@@ -1,1 +1,4 @@
 *.local.code-workspace
+.plans/NEXT.md
+/node_modules/
+extensions/*/node_modules/

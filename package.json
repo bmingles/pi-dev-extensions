@@ -1,0 +1,13 @@
+{
+  "name": "pi-dev-extensions",
+  "private": true,
+  "keywords": ["pi-package"],
+  "workspaces": ["extensions/*"],
+  "pi": {
+    "extensions": [
+      "extensions/devcontainer/src/index.ts",
+      "extensions/sbx/src/index.ts",
+      "extensions/caffeinate/src/index.ts"
+    ]
+  }
+}
