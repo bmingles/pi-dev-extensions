@@ -5,12 +5,12 @@ on the **host** and routes its built-in filesystem/shell tools into a
 **Docker Sandboxes** (`sbx`) sandbox.
 
 It is the same shape as
-[`pi-extensions/devcontainer`](../devcontainer) — override the built-in
+[`extensions/devcontainer`](../devcontainer) — override the built-in
 tools so the agent's filesystem/shell operations land in an isolated
 environment instead of the host, with no per-operation permission prompts —
 but the isolation boundary here is an `sbx` sandbox instead of a
 devcontainer. It is a **separate extension**, not a mode of
-`pi-extensions/devcontainer`: the two backends' lifecycle, path model, and
+`extensions/devcontainer`: the two backends' lifecycle, path model, and
 mount-inspection primitives differ enough that sharing one extension would
 mean branching nearly every seam on backend rather than sharing real logic.
 See the [Phase 31 plan](../../.plans/implemented/phase31-pi-sbx-extension-routing.md)
@@ -24,7 +24,7 @@ for the full "why a separate extension" reasoning.
 - Reads and writes therefore reflect the **sandbox's** filesystem. Because
   `sbx` mounts the workspace at the **same path** as on the host (an
   identity mount), no path translation happens — unlike
-  `pi-extensions/devcontainer`, there is no `toContainerPath`/
+  `extensions/devcontainer`, there is no `toContainerPath`/
   `remoteWorkspaceFolder` remapping layer at all.
 - Warms the sandbox at session start (`sbx run --name <name> -d shell
   <hostCwd>`), caches the resolved sandbox name/ID, and reuses it for every
@@ -54,8 +54,8 @@ for the full "why a separate extension" reasoning.
 Every path a routed tool receives is used **directly**, with no
 translation: `sbx` mounts the workspace at the same path as on the host, so
 a host-side path the model emits is already the correct sandbox-side path.
-This is `pi-extensions/sbx`'s one structural simplification over
-`pi-extensions/devcontainer` — there is no `paths.ts` path-mapping module
+This is `extensions/sbx`'s one structural simplification over
+`extensions/devcontainer` — there is no `paths.ts` path-mapping module
 here beyond `isHomeDirectory` (see Concept boundaries in the plan).
 
 ## `read_host` / `list_host_docs` — the gated host-read escape hatch
@@ -68,14 +68,14 @@ The tool factories, the per-hop symlink-safe mount barrier they're built on,
 and the confirmation/`.md`-docs-exception behavior all live in the shared
 [`pi-extension-host-read-core`](../host-read-core) package (Phase 30), not
 in this extension — see that package's README for the shared machinery
-itself, and `pi-extensions/devcontainer/README.md` for a fuller writeup of
+itself, and `extensions/devcontainer/README.md` for a fuller writeup of
 the tools' user-facing behavior (identical here).
 
 ### How the single-mount model simplifies the barrier vs. devcontainer's
 
-`pi-extensions/devcontainer`'s `getMounts` calls `devc mounts <hostCwd>
+`extensions/devcontainer`'s `getMounts` calls `devc mounts <hostCwd>
 --json` — a dynamic, N-entry table (bind + volume mounts) that can change
-between sandboxed runs. `pi-extensions/sbx`'s `getMounts` (in `src/tools.ts`)
+between sandboxed runs. `extensions/sbx`'s `getMounts` (in `src/tools.ts`)
 needs **no `sbx` call at all**: `sbx` mounts the entire workspace 1:1 at
 `hostCwd`, so the mount table is always exactly the single, statically-known
 entry:
@@ -94,7 +94,7 @@ those instead.
 ## Home-directory start confirmation
 
 `sbx` mounts the workspace directory as given. If `hostCwd` is the host's
-home directory itself — e.g. running `pi -e .../pi-extensions/sbx` from `~`
+home directory itself — e.g. running `pi -e .../extensions/sbx` from `~`
 rather than a project under it — that mount is the user's **entire home
 directory**: SSH keys, credentials, every other project. Before starting
 the sandbox in that case, the extension prompts (`ctx.ui.confirm`);
@@ -117,7 +117,7 @@ identifiable in `sbx ls` output and stable across processes.
 
 ```bash
 cd /path/to/project
-pi -e /path/to/agent-tools/pi-extensions/sbx
+pi -e /path/to/pi-dev-extensions/extensions/sbx
 ```
 
 `pi -e <dir>` loads the directory's `package.json` `pi.extensions` entry
@@ -140,7 +140,7 @@ path.
 ## Out of scope (v1)
 
 - **Cross-sandbox / poison-then-teardown.** Same gap
-  `pi-extensions/devcontainer` already documents as out of scope: a removed
+  `extensions/devcontainer` already documents as out of scope: a removed
   sandbox's bytes could persist on the host bind-mount source after the
   sandbox itself is gone; `read_host`'s mount barrier only ever excludes the
   *current* sandbox's mount, not a historical taint set. Not re-litigated
@@ -154,7 +154,7 @@ path.
 ## Development
 
 Part of the repo-root npm workspace (see the root README's
-"`pi-extensions/` packaging" section) — `npm install` here works standalone,
+"Package layout" section) — `npm install` here works standalone,
 but a single `npm install` from the repo root covers all four packages at
 once.
 
@@ -185,7 +185,7 @@ host where `sbx` actually exists.
 **Manual smoke test (run on a host with `sbx` installed — not part of this
 extension's own automated test suite):**
 
-- `cd <project> && pi -e pi-extensions/sbx`, then have the agent
+- `cd <project> && pi -e extensions/sbx`, then have the agent
   `read`/`write`/`edit`/`bash` — verify effects land **inside** the sandbox
   (e.g. a file the agent writes is visible via `sbx exec <derived-name> --
   cat …`, and a `bash` command uses the sandbox's toolchain).

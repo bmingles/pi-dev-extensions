@@ -33,10 +33,13 @@ source /path/to/pi-dev-extensions/scripts/bash_aliases_pic.sh
 ```
 
 It has no knowledge of where `devc` comes from — the `devcontainer`
-extension invokes plain `devc` on `PATH` by default. If you run `devc` from
-source (e.g. from an `agent-tools` checkout) rather than a compiled binary,
-export `$DEVC_BIN` yourself; see
-[`extensions/devcontainer/README.md`](extensions/devcontainer/README.md).
+extension invokes plain `devc` on `PATH` by default, or `$DEVC_BIN` if set;
+see [`extensions/devcontainer/README.md`](extensions/devcontainer/README.md).
+If you run `devc` from source (e.g. from an `agent-tools` checkout) rather
+than a compiled binary, source `agent-tools/scripts/bash_aliases_devc.sh` in
+your shell profile too — it exports `$DEVC_BIN` for you, so no manual export
+is needed. Without it, `devc` being a bash function is not enough: pi spawns
+`devc` as a real child process, which never sees shell functions.
 
 ## Package layout
 

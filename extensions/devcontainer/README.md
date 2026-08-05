@@ -2,7 +2,8 @@
 
 A [pi](https://github.com/earendil-works) coding-agent extension that runs `pi`
 on the **host** and routes its built-in filesystem/shell tools into a
-**devcontainer** via the [`devc`](../../devc) CLI.
+**devcontainer** via the [`devc`](https://github.com/emeraldwalk/agent-tools/tree/main/devc)
+CLI (a separate repo — see Requirements below).
 
 It is the same shape as pi's bundled
 [`gondolin`](https://github.com/earendil-works/gondolin) example (which routes
@@ -115,7 +116,7 @@ scope for v1; a persisted taint set would be the durable fix (future phase).
 
 The devcontainer's workspace mount binds `hostCwd` (where pi was launched)
 into the container. If `hostCwd` is the host's home directory itself — e.g.
-running `pi -e .../pi-extensions/devcontainer` from `~` rather than a project
+running `pi -e .../extensions/devcontainer` from `~` rather than a project
 under it — that mount is the user's **entire home directory**: SSH keys,
 credentials, every other project. Before starting the container in that case,
 the extension prompts (`ctx.ui.confirm`); declining aborts the start with no
@@ -140,7 +141,7 @@ Every path a routed tool receives is interpreted as a **container** path:
 
 ```bash
 cd /path/to/project
-pi -e /path/to/agent-tools/pi-extensions/devcontainer
+pi -e /path/to/pi-dev-extensions/extensions/devcontainer
 ```
 
 `pi -e <dir>` loads the directory's `package.json` `pi.extensions` entry
@@ -152,23 +153,23 @@ folders.
 
 ## Requirements
 
-- **`devc`** (see [`../../devc`](../../devc)) — the extension's only runtime
-  dependency. By default it is spawned as a `devc` binary on `PATH`. To use a
-  non-compiled devc (run from source), set **`$DEVC_BIN`** to the full invocation
-  instead, e.g.
+- **`devc`** (see [`emeraldwalk/agent-tools`](https://github.com/emeraldwalk/agent-tools/tree/main/devc),
+  a separate repo — this extension has no source dependency on it, only a
+  runtime one) — the extension's only runtime dependency. By default it is
+  spawned as a `devc` binary on `PATH`. To use a non-compiled devc (run from
+  source), set **`$DEVC_BIN`** to the full invocation instead, e.g.
   `DEVC_BIN="deno run --allow-run=docker,devcontainer,git,tmux,tty --allow-read --allow-write --allow-env /path/to/agent-tools/devc/main.ts"`.
   The value is whitespace-split (first token = executable, the rest are prepended
-  before each devc subcommand); paths with spaces need a compiled binary. The
-  `pic` shell function in
-  [`../../scripts/bash_aliases_pi-extensions.sh`](../../scripts/bash_aliases_pi-extensions.sh)
-  sets this automatically.
+  before each devc subcommand); paths with spaces need a compiled binary.
+  `agent-tools/scripts/bash_aliases_devc.sh` exports this for you — source it
+  in your shell profile instead of setting `$DEVC_BIN` by hand.
 - **Node.js ≥ 26.5.0** — the repo-root `.nvmrc` pins the version. Native `.ts`
   type-stripping means there is no build step.
 
 ## Development
 
 Part of the repo-root npm workspace (see the root README's
-"`pi-extensions/` packaging" section) — `npm install` here works standalone,
+"Package layout" section) — `npm install` here works standalone,
 but a single `npm install` from the repo root covers all four packages at
 once.
 

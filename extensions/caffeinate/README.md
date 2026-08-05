@@ -23,7 +23,7 @@ whether it's currently holding the machine awake.
 
 macOS-only: on any other platform, it no-ops and shows a
 `caffeinate: unsupported (not macOS)` status once, instead of failing. This
-matters for this repo in particular — `pi -e pi-extensions/devcontainer`
+matters for this repo in particular — `pi -e extensions/devcontainer`
 (see [`../devcontainer`](../devcontainer)) runs pi on the host with tools
 routed into a devcontainer; this extension is meant to stack alongside it
 (`pi -e ... -e ...`, both on the host) rather than replace it. If `caffeinate`
@@ -34,13 +34,13 @@ line only — it never breaks the agent run.
 
 ```bash
 cd /path/to/project
-pi -e /path/to/agent-tools/pi-extensions/caffeinate
+pi -e /path/to/pi-dev-extensions/extensions/caffeinate
 ```
 
 Stack it with another extension by repeating `-e`:
 
 ```bash
-pi -e /path/to/agent-tools/pi-extensions/devcontainer -e /path/to/agent-tools/pi-extensions/caffeinate
+pi -e /path/to/pi-dev-extensions/extensions/devcontainer -e /path/to/pi-dev-extensions/extensions/caffeinate
 ```
 
 For auto-discovery / `/reload`, copy or symlink it into
@@ -53,7 +53,7 @@ override an explicit lid-close/battery choice). Override with
 `$PI_CAFFEINATE_ARGS` (whitespace-split), e.g.:
 
 ```bash
-PI_CAFFEINATE_ARGS="-d -i -s" pi -e /path/to/agent-tools/pi-extensions/caffeinate
+PI_CAFFEINATE_ARGS="-d -i -s" pi -e /path/to/pi-dev-extensions/extensions/caffeinate
 ```
 
 `-d` also keeps the display on; `-s` also holds system sleep while on AC power.
@@ -68,7 +68,7 @@ PI_CAFFEINATE_ARGS="-d -i -s" pi -e /path/to/agent-tools/pi-extensions/caffeinat
 ## Development
 
 Part of the repo-root npm workspace (see the root README's
-"`pi-extensions/` packaging" section) — `npm install` here works standalone,
+"Package layout" section) — `npm install` here works standalone,
 but a single `npm install` from the repo root covers all four packages at
 once.
 

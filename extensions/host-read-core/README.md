@@ -5,9 +5,9 @@ and is never the target of `pi -e`. It exists so two devcontainer/sandbox-style
 pi extensions can share the exact same `read_host` / `list_host_docs`
 machinery instead of duplicating it:
 
-- **[`pi-extensions/devcontainer`](../devcontainer)** — routes tools into a
+- **[`extensions/devcontainer`](../devcontainer)** — routes tools into a
   devcontainer via `devc`
-- **`pi-extensions/sbx`** (Phase 31) — routes tools into a Docker Sandboxes
+- **`extensions/sbx`** (Phase 31) — routes tools into a Docker Sandboxes
   (`sbx`) sandbox
 
 ## What's in here
@@ -58,7 +58,7 @@ local disk (a symlink or copy into `node_modules/`, depending on npm
 version) — nothing is published to any registry, and no network access is
 required.
 
-Then wire it up (see `pi-extensions/devcontainer/src/index.ts` for the full
+Then wire it up (see `extensions/devcontainer/src/index.ts` for the full
 pattern):
 
 ```ts
@@ -80,7 +80,7 @@ pi.registerTool(createListHostDocsTool(hostCwd, hostReadDeps));
 
 ## The `dependencies` vs `devDependencies` gotcha
 
-Unlike every other `pi-extensions/*` package in this repo — where
+Unlike every other `extensions/*` package in this repo — where
 `@earendil-works/pi-coding-agent` and `typebox` are `devDependencies`,
 because those packages are never someone else's transitive dependency — this
 package declares them as regular **`dependencies`**.
@@ -102,7 +102,7 @@ easy to miss until a consumer's typecheck or the manual smoke test.
 ## Development
 
 Part of the repo-root npm workspace (see the root README's
-"`pi-extensions/` packaging" section) — `npm install` here works standalone,
+"Package layout" section) — `npm install` here works standalone,
 but a single `npm install` from the repo root covers all four packages at
 once.
 
@@ -114,4 +114,4 @@ npm test           # node --test (unit tests, fully fake fs/mounts — no devc/d
 
 This package has no manual smoke test of its own — it has no `pi.extensions`
 entry, so it can't be loaded via `pi -e` directly. Exercise it through a
-consumer (`pi-extensions/devcontainer`'s own smoke test).
+consumer (`extensions/devcontainer`'s own smoke test).
