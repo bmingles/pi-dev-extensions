@@ -56,7 +56,7 @@ The repo root's `package.json` does double duty:
 - It's also the real npm workspaces root (`"workspaces": ["extensions/*"]`)
   — one `npm install` from repo root hoists and links all four packages
   correctly regardless of order. This is also exactly what `pi install
-  git:...`'s own automatic `npm install` step runs, so installing straight
+git:...`'s own automatic `npm install` step runs, so installing straight
   from GitHub needs no extra manual step.
 
 The only footprint at the true repo root is a gitignored `node_modules/` and
@@ -82,7 +82,7 @@ package listed there automatically once the project is trusted — no separate
 {
   "packages": [
     {
-      "source": "git:github.com/<you>/pi-dev-extensions@main",
+      "source": "git:github.com/bmingles/pi-dev-extensions@main",
       "extensions": ["extensions/devcontainer/src/index.ts"]
     }
   ]
@@ -106,7 +106,7 @@ host.
 
 > **Mutually exclusive with `extensions/sbx`.** Both override the same tool
 > names (`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `read_host`,
-> `list_host_docs`). Pi's tool registry silently lets whichever loads *last*
+> `list_host_docs`). Pi's tool registry silently lets whichever loads _last_
 > win — the other's routing goes dead with no error. Enable only one at a
 > time (see "Package Filtering" above). If both end up loaded anyway, each
 > extension detects the other at `session_start` and surfaces a loud warning
