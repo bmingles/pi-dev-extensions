@@ -73,12 +73,15 @@ workspaces root above), and loads whichever paths its `pi.extensions`
 manifest lists — **all three by default**. `devcontainer` and `sbx` are
 mutually exclusive (see below), so pick one at install time using pi's
 package filtering, either via `pi config` after installing, or by writing the
-filtered form directly into `.pi/settings.json` up front (pi installs any
-package listed there automatically once the project is trusted — no separate
-`pi install` step needed):
+filtered form directly into settings up front (pi installs any package
+listed there automatically once the project is trusted — no separate
+`pi install` step needed). Use `.pi/settings.json` to scope it to one
+project, or `~/.pi/agent/settings.json` to make it the default for every
+project on the machine — same `packages` shape either way:
 
 ```json
-// .pi/settings.json — enables only extensions/devcontainer
+// .pi/settings.json (project-local) or ~/.pi/agent/settings.json (global)
+// — enables only extensions/devcontainer
 {
   "packages": [
     {
