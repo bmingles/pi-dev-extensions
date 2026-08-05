@@ -22,6 +22,22 @@ environment, plus keeping the host machine awake while pi works unattended:
 - `devc` on `PATH` for `extensions/devcontainer`; `sbx` on `PATH` for
   `extensions/sbx` (see each package's README)
 
+## Shell setup
+
+`scripts/bash_aliases_pic.sh` defines `pic` — `pi` launched with the
+`caffeinate` and `devcontainer` extensions loaded, by absolute path, so it
+works from any directory. Source it from your `~/.bashrc` or `~/.zshrc`:
+
+```bash
+source /path/to/pi-dev-extensions/scripts/bash_aliases_pic.sh
+```
+
+It has no knowledge of where `devc` comes from — the `devcontainer`
+extension invokes plain `devc` on `PATH` by default. If you run `devc` from
+source (e.g. from an `agent-tools` checkout) rather than a compiled binary,
+export `$DEVC_BIN` yourself; see
+[`extensions/devcontainer/README.md`](extensions/devcontainer/README.md).
+
 ## Package layout
 
 This repo follows pi's own [package conventions](https://github.com/earendil-works)
