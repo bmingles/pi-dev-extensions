@@ -163,8 +163,11 @@ folders.
   before each devc subcommand); paths with spaces need a compiled binary.
   `agent-tools/scripts/bash_aliases_devc.sh` exports this for you — source it
   in your shell profile instead of setting `$DEVC_BIN` by hand.
-- **Node.js ≥ 26.5.0** — the repo-root `.nvmrc` pins the version. Native `.ts`
-  type-stripping means there is no build step.
+- **Node.js ≥ 22.19.0** — native `.ts` type-stripping (no build step) needs
+  Node's default-on stripping support (22.18.0+); this package's source uses
+  no non-erasable TS syntax, so the extra `--experimental-transform-types`
+  flag some code needs is never required. (The repo-root `.nvmrc` pins a
+  newer version for local dev — that's not a floor.)
 
 ## Development
 

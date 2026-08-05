@@ -134,8 +134,11 @@ path.
   `PATH` — unlike `devc` (this repo's own CLI), there is no
   `$SBX_BIN`-style override, since `sbx` is purely an external Docker
   Desktop binary with no compiled-vs-run-from-source distinction to support.
-- **Node.js ≥ 26.5.0** — the repo-root `.nvmrc` pins the version. Native
-  `.ts` type-stripping means there is no build step.
+- **Node.js ≥ 22.19.0** — native `.ts` type-stripping (no build step) needs
+  Node's default-on stripping support (22.18.0+); this package's source uses
+  no non-erasable TS syntax, so the extra `--experimental-transform-types`
+  flag some code needs is never required. (The repo-root `.nvmrc` pins a
+  newer version for local dev — that's not a floor.)
 
 ## Out of scope (v1)
 

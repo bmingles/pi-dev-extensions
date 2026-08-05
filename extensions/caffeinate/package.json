@@ -8,7 +8,7 @@
     ]
   },
   "engines": {
-    "node": ">=26.5.0"
+    "node": ">=22.19.0"
   },
   "scripts": {
     "test": "node --test",
@@ -16,7 +16,7 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.83.0",
-    "@types/node": "^26.1.2",
+    "@types/node": "^22.20.1",
     "typescript": "^5"
   }
 }

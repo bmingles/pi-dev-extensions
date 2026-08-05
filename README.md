@@ -17,8 +17,11 @@ environment, plus keeping the host machine awake while pi works unattended:
 
 ## Requirements
 
-- Node.js ≥ 26.5.0 (see `.nvmrc`) — all four packages use native `.ts`
-  type-stripping, no build step
+- Node.js ≥ 22.19.0 — all four packages use native `.ts` type-stripping (no
+  build step), which needs Node's default-on stripping support (22.18.0+);
+  the extra `--experimental-transform-types` flag some non-erasable TS
+  syntax needs is never required here since none of the source uses it
+  (`.nvmrc` pins a newer version for local dev, but that's not a floor)
 - `devc` on `PATH` for `extensions/devcontainer`; `sbx` on `PATH` for
   `extensions/sbx` (see each package's README)
 

@@ -78,26 +78,44 @@ pi.registerTool(createReadHostTool(hostCwd, hostReadDeps));
 pi.registerTool(createListHostDocsTool(hostCwd, hostReadDeps));
 ```
 
-## The `dependencies` vs `devDependencies` gotcha
+## `peerDependencies`, not `devDependencies` or `dependencies`
 
-Unlike every other `extensions/*` package in this repo — where
-`@earendil-works/pi-coding-agent` and `typebox` are `devDependencies`,
-because those packages are never someone else's transitive dependency — this
-package declares them as regular **`dependencies`**.
+`host-read.ts` calls `defineTool`/`getDocsPath`/`truncateHead`/
+`DEFAULT_MAX_BYTES`/`DEFAULT_MAX_LINES`/`formatSize` (from
+`@earendil-works/pi-coding-agent`) and `Type.Object` (from `typebox`) at
+*runtime*, not just for types — same as `extensions/devcontainer` and
+`extensions/sbx`, which import `create*Tool`/`truncateHead`/etc. from
+`@earendil-works/pi-coding-agent` directly. Per pi's own
+[`docs/packages.md`](https://github.com/earendil-works) — *"Pi bundles core
+packages for extensions and skills. If you import any of these, list them in
+`peerDependencies` with a `"*"` range and do not bundle them"* — all three
+packages declare `@earendil-works/pi-coding-agent` (and, here, `typebox`) as
+**`peerDependencies`**, never `dependencies` or `devDependencies`.
 
-npm only installs a package's own `dependencies` when that package is pulled
-in transitively (e.g. via another package's `file:../host-read-core`); it
-never installs a transitively-included package's `devDependencies`. Since
-`host-read.ts` calls `defineTool`/`Type.Object`/`getDocsPath`/`truncateHead`/
-`DEFAULT_MAX_BYTES`/`DEFAULT_MAX_LINES`/`formatSize` at *runtime*, and this
-package is always consumed as someone else's dependency, they must be
-declared where npm will actually install them.
+Why this matters: package installs from `pi install`/`pi -e git:...` are
+production installs (`npm install --omit=dev`), so anything only in
+`devDependencies` never gets installed for a real consumer — the failure mode
+is a runtime `Error: Cannot find module '@earendil-works/pi-coding-agent'`
+(or `typebox`) from *inside* this package's code, surfacing only when a
+consumer imports it, not a compile error in `npm test`/`npm run typecheck`
+here, so it's easy to miss. `dependencies` would avoid that failure but
+bundle a second, separately-resolved copy alongside whatever pi's own host
+process already provides — exactly what "do not bundle them" warns against.
+`peerDependencies` with `"*"` avoids both: npm still auto-installs a real,
+resolvable copy (verified empirically — even a bare `peerDependencies: "*"`
+with no version pinned anywhere else in the graph installs correctly under
+`--omit=dev`, standalone or as part of this repo's workspace), while
+documenting that the *version* is pi's call, not this package's.
+`@earendil-works/pi-coding-agent` itself depends on `typebox`, so
+`extensions/devcontainer`/`extensions/sbx` — which use `create*Tool` but
+never import `typebox` directly — get it transitively and don't declare it
+themselves.
 
-Get this wrong and the failure mode is a runtime `Error: Cannot find module
-'@earendil-works/pi-coding-agent'` (or `typebox`) from *inside*
-`host-read-core`'s own code, surfacing only when a consumer imports it — not
-a compile error in this package's own `npm test`/`npm run typecheck`, so it's
-easy to miss until a consumer's typecheck or the manual smoke test.
+`extensions/caffeinate` is the one exception: it only does
+`import type { ExtensionAPI, ExtensionContext }`, which is erased entirely at
+build/load time, so it has no runtime dependency on
+`@earendil-works/pi-coding-agent` at all — a `devDependency` (for local
+`tsc`/`node --test`) is correct and sufficient there.
 
 ## Development
 
