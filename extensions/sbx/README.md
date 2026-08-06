@@ -26,9 +26,14 @@ for the full "why a separate extension" reasoning.
   identity mount), no path translation happens — unlike
   `extensions/devcontainer`, there is no `toContainerPath`/
   `remoteWorkspaceFolder` remapping layer at all.
-- Warms the sandbox at session start (`sbx run --name <name> -d shell
-  <hostCwd>`), caches the resolved sandbox name/ID, and reuses it for every
-  routed tool call.
+- Warms the sandbox at session start. First checks `sbx ls --json` for an
+  existing `shell`-agent sandbox already mounting this exact `hostCwd`; if
+  one or more are found, prompts you to pick one to attach to (or create a
+  new one anyway). Otherwise (or with that choice made) runs `sbx run
+  --name <name> -d shell <hostCwd>` — either `<name>` you picked, or one
+  derived from `hostCwd` for a fresh sandbox. Either way, caches the
+  resolved sandbox name/ID and reuses it for every routed tool call. See
+  "Finding an existing sandbox for this workspace" below.
 - Adds two **new** tools: `read_host`, the escape hatch that reads the
   **host** filesystem, and `list_host_docs`, an unprompted listing
   counterpart scoped to pi's own docs directory — both from the shared
@@ -113,6 +118,42 @@ basename plus the first 8 hex characters of a SHA-256 hash of the full,
 resolved `hostCwd`, prefixed with `pi-` (e.g. `pi-my-project-1a2b3c4d`) —
 identifiable in `sbx ls` output and stable across processes.
 
+This is only the name used for sandboxes **this extension creates** —
+see the next section for how an already-existing sandbox (under any name)
+is found and reused instead.
+
+## Finding an existing sandbox for this workspace
+
+Before creating anything, the extension runs `sbx ls --json` and filters
+its `sandboxes` array to entries where `agent == "shell"` and `workspaces`
+contains this exact `hostCwd` (compared via `path.resolve` on both sides,
+so a relative or trailing-slash `hostCwd` still matches). This catches
+sandboxes this extension didn't itself create — started manually, by an
+older version of this extension, or under `sbx`'s own default naming (e.g.
+`shell-my-project`) — which the old derived-name-only lookup silently
+missed, leaving them orphaned while a second, differently-named sandbox
+got created alongside them.
+
+- **No match** — falls through to today's behavior: `sbx run --name
+  <derivedName> -d shell <hostCwd>`.
+- **One or more matches, UI available** — prompts with a picker listing
+  each match's name, status, and short ID, plus a "Create a new sandbox"
+  option; the chosen sandbox's *actual* name is passed to `sbx run --name`
+  instead of the derived one (so `sbx run`'s own attach-by-name behavior
+  reattaches it, restarting it first if `stopped`).
+- **Exactly one match, no UI** (e.g. print/RPC mode) — attaches to it
+  without prompting; nothing to ask through, and it's unambiguous.
+- **Multiple matches, no UI** — fails loudly rather than guessing which
+  sandbox to route tool calls into; the error lists the candidate names and
+  suggests running interactively, or `sbx stop`/`sbx rm`-ing the ones you
+  don't want.
+- **`sbx ls --json` itself fails** (e.g. transient `sbx` hiccup) — degrades
+  to the no-match path (create via derived name) rather than blocking
+  startup; a warning is shown either way.
+
+This lookup runs once per `pi` process, same as the sandbox warm-up itself
+(cached alongside it) — no re-prompting on later tool calls.
+
 ## Usage
 
 ```bash
@@ -148,10 +189,11 @@ path.
   sandbox itself is gone; `read_host`'s mount barrier only ever excludes the
   *current* sandbox's mount, not a historical taint set. Not re-litigated
   per backend — see that extension's README.
-- **`sbx ls --json` / any other `sbx` introspection.** Deliberately unused —
-  the static single-entry `getMounts` above makes it unnecessary, and the
-  schema of `sbx ls --json` has not been verified against a real binary (see
-  Testing below).
+- **`sbx ls --json` for mount introspection.** `sbx ls --json` *is* used now
+  (see "Finding an existing sandbox for this workspace" above), but only for
+  its `agent`/`status`/`workspaces` fields — the static single-entry
+  `getMounts` above still doesn't call it, since sbx's mount model needs no
+  introspection to determine (see that section).
 - **Sandbox lifecycle management** (stop/rm) — user-managed, see above.
 
 ## Development
@@ -178,12 +220,21 @@ package only tests its own `getMounts` and the `sbx`-spawning pieces
 ### A note on the `sbx` CLI facts this extension assumes
 
 This extension was implemented without a real `sbx` binary available (see
-the plan's Testing section) — its flag shapes (`sbx run --name <name> -d
-shell <hostCwd>`, `sbx exec -i -w <cwd> -e K=V... <name> <argv...>`, no `--`
-separator before the routed command, no infra-vs-command exit code) are
-drawn from `docs.docker.com/reference/cli/sbx/*`, not a live binary. The
-real end-to-end check is the manual smoke test below, run by a human on a
-host where `sbx` actually exists.
+the plan's Testing section) — most of its flag shapes (`sbx run --name
+<name> -d shell <hostCwd>`, `sbx exec -i -w <cwd> -e K=V... <name>
+<argv...>`, no `--` separator before the routed command, no infra-vs-command
+exit code) are drawn from `docs.docker.com/reference/cli/sbx/*`, not a live
+binary — those pages turned out to be documentation stubs with no actual
+flag/behavior content, so this is weaker than it sounds. The one exception:
+`sbx ls --json`'s shape (`{ "sandboxes": [{ name, id, agent, status,
+workspaces: string[] }, ...] }`) *was* confirmed against a real binary's
+output (a `stopped` sandbox with an empty `PORTS` column), which is what
+`sbxLs`/`findSandboxesForWorkspace` (`src/sbx.ts`) parse. Still unconfirmed
+against a real binary: whether `sbx run --name <existing-but-stopped-name>`
+actually restarts it in place (assumed, not verified — no separate `sbx
+start` is called) rather than erroring or recreating. The real end-to-end
+check is the manual smoke test below, run by a human on a host where `sbx`
+actually exists.
 
 **Manual smoke test (run on a host with `sbx` installed — not part of this
 extension's own automated test suite):**
@@ -196,6 +247,13 @@ extension's own automated test suite):**
 - Confirm `sbx ls` shows a sandbox named per `deriveSandboxName`'s scheme.
 - Confirm starting from `$HOME` triggers the confirmation prompt, and
   declining aborts with no sandbox created.
+- Create a sandbox for a workspace outside this extension (e.g. plain `sbx
+  run --name my-manual-sbx shell <dir>`), `sbx stop` it, then launch `pi -e
+  extensions/sbx` from that same `<dir>` — confirm the picker offers
+  `my-manual-sbx` and that picking it reattaches (and restarts) it rather
+  than creating a second, derived-name sandbox alongside it.
+- Same setup, but with two matching sandboxes for one workspace — confirm
+  both appear in the picker, and that "Create a new sandbox" still works.
 - `read_host` on a host path outside `hostCwd` (e.g. `~/.config/foo`) →
   prompts with the resolved path, reads on approve.
 - `read_host` on a path *inside* `hostCwd` → refused (use the routed `read`

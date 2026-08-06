@@ -5,8 +5,10 @@ import { PassThrough } from "node:stream";
 import { test } from "node:test";
 import { deriveSandboxName } from "./name.ts";
 import {
+  findSandboxesForWorkspace,
   runInSandbox,
   SbxInfraError,
+  sbxLs,
   sbxUp,
   type SpawnFn,
 } from "./sbx.ts";
@@ -102,6 +104,131 @@ test("sbxUp throws SbxInfraError on non-zero exit", async () => {
 test("sbxUp throws SbxInfraError on a spawn failure (e.g. sbx missing from PATH)", async () => {
   const { spawn } = makeSpawn({ spawnError: new Error("ENOENT") });
   await assert.rejects(() => sbxUp("/host", spawn), SbxInfraError);
+});
+
+test("sbxUp uses an explicit name over the derived one when given", async () => {
+  const hostCwd = "/home/u/proj";
+  const { spawn, calls } = makeSpawn({ stdout: "sandbox-id-123\n", code: 0 });
+
+  const info = await sbxUp(hostCwd, spawn, "shell-proj-manual");
+
+  assert.deepEqual(calls[0].args, [
+    "run",
+    "--name",
+    "shell-proj-manual",
+    "-d",
+    "shell",
+    hostCwd,
+  ]);
+  assert.equal(info.name, "shell-proj-manual");
+});
+
+test("sbxLs issues `sbx ls --json` and parses the sandboxes array", async () => {
+  const { spawn, calls } = makeSpawn({
+    stdout: JSON.stringify({
+      sandboxes: [
+        {
+          name: "shell-deephaven-core",
+          id: "f5c26d99-b923-4d6a-9359-7ccc8040a200",
+          agent: "shell",
+          status: "stopped",
+          workspaces: ["/Users/bingles/code/deephaven-core"],
+        },
+      ],
+    }),
+    code: 0,
+  });
+
+  const sandboxes = await sbxLs(spawn);
+
+  assert.deepEqual(calls[0].args, ["ls", "--json"]);
+  assert.deepEqual(sandboxes, [
+    {
+      name: "shell-deephaven-core",
+      id: "f5c26d99-b923-4d6a-9359-7ccc8040a200",
+      agent: "shell",
+      status: "stopped",
+      workspaces: ["/Users/bingles/code/deephaven-core"],
+    },
+  ]);
+});
+
+test("sbxLs returns an empty array when there are no sandboxes", async () => {
+  const { spawn } = makeSpawn({
+    stdout: JSON.stringify({ sandboxes: [] }),
+    code: 0,
+  });
+  assert.deepEqual(await sbxLs(spawn), []);
+});
+
+test("sbxLs throws SbxInfraError on non-zero exit", async () => {
+  const { spawn } = makeSpawn({ stderr: "boom", code: 1 });
+  await assert.rejects(() => sbxLs(spawn), SbxInfraError);
+});
+
+test("sbxLs throws SbxInfraError on unparseable JSON", async () => {
+  const { spawn } = makeSpawn({ stdout: "not json", code: 0 });
+  await assert.rejects(() => sbxLs(spawn), SbxInfraError);
+});
+
+test("sbxLs throws SbxInfraError when the response has no sandboxes array", async () => {
+  const { spawn } = makeSpawn({ stdout: JSON.stringify({ oops: [] }), code: 0 });
+  await assert.rejects(() => sbxLs(spawn), SbxInfraError);
+});
+
+test("findSandboxesForWorkspace matches by resolved workspace path and shell agent", async () => {
+  const { spawn } = makeSpawn({
+    stdout: JSON.stringify({
+      sandboxes: [
+        {
+          name: "shell-deephaven-core",
+          id: "abc",
+          agent: "shell",
+          status: "stopped",
+          workspaces: ["/home/u/proj"],
+        },
+        {
+          name: "other-agent-proj",
+          id: "def",
+          agent: "coding",
+          status: "running",
+          workspaces: ["/home/u/proj"],
+        },
+        {
+          name: "unrelated",
+          id: "ghi",
+          agent: "shell",
+          status: "running",
+          workspaces: ["/home/u/other"],
+        },
+      ],
+    }),
+    code: 0,
+  });
+
+  const matches = await findSandboxesForWorkspace("/home/u/proj", spawn);
+
+  assert.deepEqual(matches.map((m) => m.name), ["shell-deephaven-core"]);
+});
+
+test("findSandboxesForWorkspace normalizes relative/trailing-slash hostCwd before comparing", async () => {
+  const { spawn } = makeSpawn({
+    stdout: JSON.stringify({
+      sandboxes: [
+        {
+          name: "shell-proj",
+          id: "abc",
+          agent: "shell",
+          status: "running",
+          workspaces: ["/home/u/proj"],
+        },
+      ],
+    }),
+    code: 0,
+  });
+
+  const matches = await findSandboxesForWorkspace("/home/u/proj/", spawn);
+  assert.deepEqual(matches.map((m) => m.name), ["shell-proj"]);
 });
 
 test("runInSandbox builds `sbx exec -i -w <cwd> -e K=V... <name> <argv...>`, pipes stdin", async () => {

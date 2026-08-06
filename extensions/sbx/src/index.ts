@@ -36,8 +36,14 @@ import {
   createReadHostTool,
   realHostReadFs,
 } from "pi-extension-host-read-core";
+import { deriveSandboxName } from "./name.ts";
 import { isHomeDirectory } from "./paths.ts";
-import { type SandboxInfo, sbxUp } from "./sbx.ts";
+import {
+  type ExistingSandbox,
+  findSandboxesForWorkspace,
+  type SandboxInfo,
+  sbxUp,
+} from "./sbx.ts";
 import {
   boundRun,
   createBashOperations,
@@ -96,6 +102,67 @@ export default function (pi: ExtensionAPI) {
   // way) so a decline/no-UI refusal isn't re-prompted on every tool call.
   let homeDirGate: "approved" | Error | undefined;
 
+  /**
+   * If `sbx ls --json` already has one or more "shell" sandboxes mounting
+   * this exact `hostCwd`, let the user pick one to attach to instead of
+   * silently creating another via `deriveSandboxName` — the gap that
+   * motivated this lookup: a sandbox created manually, by an older version
+   * of this extension, or under `sbx`'s own default naming (e.g.
+   * `shell-<workdir>`) previously went undiscovered and got a duplicate
+   * spun up alongside it.
+   *
+   * Returns the chosen sandbox's real name for `sbxUp` to attach to, or
+   * `undefined` to fall through to `sbxUp`'s own `deriveSandboxName`
+   * default (no matches, user picked "create new", or the picker was
+   * dismissed). A listing failure degrades to `undefined` (create-new)
+   * rather than blocking startup — the lookup is an enhancement over the
+   * old create-or-attach-by-derived-name behavior, not a hard requirement.
+   */
+  async function resolveExistingSandboxName(
+    ctx: ExtensionContext | undefined,
+  ): Promise<string | undefined> {
+    let matches: ExistingSandbox[];
+    try {
+      matches = await findSandboxesForWorkspace(hostCwd);
+    } catch (err) {
+      ctx?.ui.notify(
+        `sbx: couldn't list existing sandboxes (${
+          describeError(err)
+        }); creating a new one.`,
+        "warning",
+      );
+      return undefined;
+    }
+    if (matches.length === 0) return undefined;
+
+    if (!ctx?.hasUI) {
+      // Single unambiguous match: attach without prompting (nothing to ask
+      // through in e.g. print/RPC mode). Multiple matches can't be
+      // disambiguated without UI — fail loudly rather than guessing which
+      // one to route tool calls into.
+      if (matches.length === 1) return matches[0].name;
+      throw new Error(
+        "sbx: multiple existing sandboxes match this workspace (" +
+          matches.map((m) => m.name).join(", ") +
+          ") but no UI is available to choose one. Run pi interactively to " +
+          "pick, or `sbx stop`/`sbx rm` the ones you don't want.",
+      );
+    }
+
+    const derivedName = deriveSandboxName(hostCwd);
+    const createLabel = `+ Create a new sandbox (${derivedName})`;
+    const labelFor = (s: ExistingSandbox) =>
+      `${s.name} — ${s.status}${s.id ? ` (${s.id.slice(0, 12)})` : ""}`;
+    const byLabel = new Map(matches.map((s) => [labelFor(s), s]));
+
+    const picked = await ctx.ui.select(
+      "Found existing sbx sandbox(es) for this workspace",
+      [...matches.map(labelFor), createLabel],
+    );
+    if (picked === undefined || picked === createLabel) return undefined;
+    return byLabel.get(picked)?.name;
+  }
+
   /** Lazily `sbxUp` once, cache the SandboxInfo anchor, reuse thereafter. */
   async function ensureSandbox(ctx?: ExtensionContext): Promise<SandboxInfo> {
     if (info) return info;
@@ -133,6 +200,8 @@ export default function (pi: ExtensionAPI) {
           homeDirGate = "approved";
         }
 
+        const chosenName = await resolveExistingSandboxName(ctx);
+
         ctx?.ui.setStatus(
           "sbx",
           ctx?.ui.theme.fg("warning", "sbx: starting"),
@@ -148,14 +217,16 @@ export default function (pi: ExtensionAPI) {
           );
         }, 120);
         try {
-          const resolved = await sbxUp(hostCwd);
+          const resolved = await sbxUp(hostCwd, undefined, chosenName);
           info = resolved;
           ctx?.ui.setStatus(
             "sbx",
             `sbx: ${resolved.name} (${resolved.sandboxId.slice(0, 12)})`,
           );
           ctx?.ui.notify(
-            `sbx sandbox ready. Tools routed into ${resolved.name}.`,
+            chosenName
+              ? `Attached to existing sbx sandbox ${resolved.name}. Tools routed into it.`
+              : `sbx sandbox ready. Tools routed into ${resolved.name}.`,
             "info",
           );
           return resolved;
