@@ -1,6 +1,6 @@
 # pi-dev-extensions
 
-A [pi](https://github.com/earendil-works) coding-agent package bundling four
+A [pi](https://github.com/earendil-works) coding-agent package bundling five
 Node/TypeScript extensions for routing pi's tools through an isolated dev
 environment, plus keeping the host machine awake while pi works unattended:
 
@@ -8,20 +8,25 @@ environment, plus keeping the host machine awake while pi works unattended:
   built-in tools into a devcontainer via `devc`
 - **[`extensions/sbx`](#extensionssbx)** — routes pi's built-in tools into a
   Docker Sandboxes (`sbx`) sandbox instead of a devcontainer
+- **[`extensions/gondolin`](#extensionsgondolin)** — routes pi's built-in
+  tools into a local gondolin micro-VM instead of a devcontainer or sandbox
 - **[`extensions/caffeinate`](#extensionscaffeinate)** — keeps the Mac awake
   (`caffeinate`) while an agent run is active
 - **[`extensions/host-read-core`](#extensionshost-read-core)** — a shared
   library (not independently `pi -e`-loadable) providing the
-  `read_host`/`list_host_docs` tool machinery consumed by `devcontainer` and
-  `sbx`
+  `read_host`/`list_host_docs` tool machinery consumed by `devcontainer`,
+  `sbx`, and `gondolin`
 
 ## Requirements
 
-- Node.js ≥ 22.19.0 — all four packages use native `.ts` type-stripping (no
-  build step), which needs Node's default-on stripping support (22.18.0+);
-  the extra `--experimental-transform-types` flag some non-erasable TS
-  syntax needs is never required here since none of the source uses it
-  (`.nvmrc` pins a newer version for local dev, but that's not a floor)
+- Node.js ≥ 22.19.0 — four of the five packages use native `.ts`
+  type-stripping (no build step), which needs Node's default-on stripping
+  support (22.18.0+); the extra `--experimental-transform-types` flag some
+  non-erasable TS syntax needs is never required here since none of the
+  source uses it (`.nvmrc` pins a newer version for local dev, but that's not
+  a floor). `extensions/gondolin` needs a newer floor still — see below.
+- Node.js ≥ 23.6.0 and QEMU installed for `extensions/gondolin` specifically
+  (`@earendil-works/gondolin`'s own requirements)
 - `devc` on `PATH` for `extensions/devcontainer`; `sbx` on `PATH` for
   `extensions/sbx` (see each package's README)
 
@@ -60,13 +65,13 @@ The repo root's `package.json` does double duty:
   (`host-read-core` is never listed — it's a library, not `-e`-loadable).
   This is what `pi install`/`pi -e` look for.
 - It's also the real npm workspaces root (`"workspaces": ["extensions/*"]`)
-  — one `npm install` from repo root hoists and links all four packages
+  — one `npm install` from repo root hoists and links all five packages
   correctly regardless of order. This is also exactly what `pi install
 git:...`'s own automatic `npm install` step runs, so installing straight
   from GitHub needs no extra manual step.
 
 The only footprint at the true repo root is a gitignored `node_modules/` and
-a committed `package-lock.json` (the real, consolidated lockfile for all four
+a committed `package-lock.json` (the real, consolidated lockfile for all five
 packages) — no source lives there, only `package.json` plus install-time
 artifacts.
 
@@ -74,13 +79,13 @@ artifacts.
 
 Per pi's `docs/packages.md`, `pi install git:host/user/repo@ref` (or
 `pi -e git:...` to try it without persisting) clones the whole repository,
-runs `npm install` at its root (setting up all four packages via the
+runs `npm install` at its root (setting up all five packages via the
 workspaces root above), and loads whichever paths its `pi.extensions`
-manifest lists — **all three by default**. `devcontainer` and `sbx` are
-mutually exclusive (see below), so pick one at install time using pi's
-package filtering, either via `pi config` after installing, or by writing the
-filtered form directly into settings up front (pi installs any package
-listed there automatically once the project is trusted — no separate
+manifest lists — **all four by default**. `devcontainer`, `sbx`, and
+`gondolin` are mutually exclusive (see below), so pick one at install time
+using pi's package filtering, either via `pi config` after installing, or by
+writing the filtered form directly into settings up front (pi installs any
+package listed there automatically once the project is trusted — no separate
 `pi install` step needed). Use `.pi/settings.json` to scope it to one
 project, or `~/.pi/agent/settings.json` to make it the default for every
 project on the machine — same `packages` shape either way:
@@ -98,8 +103,8 @@ project on the machine — same `packages` shape either way:
 }
 ```
 
-Swap the one `extensions` entry for `"extensions/sbx/src/index.ts"` to get
-`sbx` instead.
+Swap the one `extensions` entry for `"extensions/sbx/src/index.ts"` or
+`"extensions/gondolin/src/index.ts"` to get `sbx` or `gondolin` instead.
 
 ---
 
@@ -113,13 +118,14 @@ build output, and volume-mounted paths (like `node_modules`) the host can't
 see — with no per-operation permission prompts. Bare `!` commands stay on the
 host.
 
-> **Mutually exclusive with `extensions/sbx`.** Both override the same tool
-> names (`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `read_host`,
-> `list_host_docs`). Pi's tool registry silently lets whichever loads _last_
-> win — the other's routing goes dead with no error. Enable only one at a
-> time (see "Package Filtering" above). If both end up loaded anyway, each
-> extension detects the other at `session_start` and surfaces a loud warning
-> naming both, rather than failing silently.
+> **Mutually exclusive with `extensions/sbx` and `extensions/gondolin`.** All
+> three override the same tool names (`read`, `write`, `edit`, `bash`, `grep`,
+> `find`, `ls`, `read_host`, `list_host_docs`). Pi's tool registry silently
+> lets whichever loads _last_ win — the others' routing goes dead with no
+> error. Enable only one at a time (see "Package Filtering" above). If more
+> than one ends up loaded anyway, each extension detects the others at
+> `session_start` and surfaces a loud warning naming them, rather than
+> failing silently.
 
 ```bash
 cd /path/to/project
@@ -146,8 +152,9 @@ Because `sbx` mounts the workspace at the same path as the host (an identity
 mount), there is no path-remapping layer here at all, unlike devcontainer's
 `remoteWorkspaceFolder` translation. Bare `!` commands stay on the host.
 
-> **Mutually exclusive with `extensions/devcontainer`** — see that section's
-> note above; it applies symmetrically here.
+> **Mutually exclusive with `extensions/devcontainer` and
+> `extensions/gondolin`** — see that section's note above; it applies
+> symmetrically here.
 
 ```bash
 cd /path/to/project
@@ -161,6 +168,42 @@ external Docker Desktop binary). See
 the CLI-flag assumptions this extension makes (drawn from `docs.docker.com`,
 not a live binary — flagged there for verification), and `npm run typecheck`
 / `npm test`.
+
+---
+
+## `extensions/gondolin`
+
+A pi coding-agent extension with the same shape as `extensions/devcontainer`
+and `extensions/sbx` above — it routes pi's built-in filesystem/shell tools
+(`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`) into an isolated
+environment with no per-operation permission prompts — but the isolation
+boundary is a local [gondolin](https://github.com/earendil-works/gondolin)
+micro-VM this extension itself starts and stops, rather than infrastructure
+managed by an external `devc`/`sbx` CLI. It is a separate extension (not a
+mode of either) because gondolin's lifecycle (own, per-session VM vs.
+externally-managed long-lived infra), path model, and tool implementation (an
+in-process VM API vs. shelling a CLI) differ enough to make branching one
+extension on backend more confusing than maintaining a third. Reads/writes
+land at a fixed guest workspace root (`/workspace`) the host cwd is mounted
+at; `grep`/`find` walk the guest filesystem in JS rather than shelling out to
+`rg`, since a fresh gondolin image has no guaranteed userspace beyond
+`/bin/sh`. Bare `!` commands stay on the host. Unlike `devcontainer`/`sbx`,
+the VM is stopped again at `session_shutdown` — it belongs to the pi session
+that started it, not to externally-managed infrastructure.
+
+> **Mutually exclusive with `extensions/devcontainer` and `extensions/sbx`**
+> — see that section's note above; it applies symmetrically here.
+
+```bash
+cd /path/to/project
+pi -e /path/to/pi-dev-extensions/extensions/gondolin
+```
+
+Its only runtime dependency is the `@earendil-works/gondolin` package plus
+QEMU installed on the host — no `devc`/`sbx` binary involved. See
+[`extensions/gondolin/README.md`](extensions/gondolin/README.md) for details,
+including its stricter Node.js ≥ 23.6.0 floor, and `npm run typecheck` /
+`npm test`.
 
 ---
 
@@ -192,9 +235,10 @@ A **shared library**, not a pi extension — it has no `pi.extensions` field
 and is never loaded directly via `pi -e`; it's consumed only by `import` from
 other `extensions/*` packages. It provides the backend-agnostic half of the
 `read_host`/`list_host_docs` escape hatch (the per-hop symlink-safe mount
-barrier and the two tool factories) so `extensions/devcontainer` and
-`extensions/sbx` share the exact same implementation instead of each
-duplicating it, consumed via an npm `file:` dependency
+barrier and the two tool factories) so `extensions/devcontainer`,
+`extensions/sbx`, and `extensions/gondolin` share the exact same
+implementation instead of each duplicating it, consumed via an npm `file:`
+dependency
 (`"pi-extension-host-read-core": "file:../host-read-core"`). See
 [`extensions/host-read-core/README.md`](extensions/host-read-core/README.md)
 for the `getMounts` contract each consumer must supply and `npm run
@@ -205,7 +249,7 @@ typecheck` / `npm test`.
 ## Development
 
 ```bash
-npm install         # installs and links all four packages
+npm install         # installs and links all five packages
 npm run typecheck --workspace=extensions/<name>
 npm test --workspace=extensions/<name>
 ```
