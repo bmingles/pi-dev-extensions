@@ -27,11 +27,22 @@ managed by `devc`.
   scoped to pi's own docs directory (see below).
 - Prompts for confirmation before starting the container if pi was launched
   from the host's home directory itself (see below).
+- Routes `user_bash` (the `!` prefix) into the container too, matching the
+  LLM's own `bash` tool. `!!` is the escape hatch that stays on the host —
+  see below.
+
+### `!` vs `!!`
+
+- **`!`** runs in the container, same as the agent's own `bash` tool — the
+  command shows up in the transcript / LLM context, same as any `!` command.
+- **`!!`** is **not** routed — it runs on the **host**, unrouted, using pi's
+  own local shell. This is the escape hatch for host-only operations (e.g.
+  managing the container itself via `devc`). `!!` is also pi's own
+  "exclude this from the model's context" prefix, so a `!!` command never
+  reaches the LLM either.
 
 ### What it deliberately does _not_ do
 
-- **`user_bash` (bare `!`) is not routed.** It is user-invoked and stays on the
-  host as your own shell / escape hatch.
 - **No container lifecycle management beyond warm-up.** devc containers are
   long-lived; use `devc stop` / `devc down` to manage them. The extension never
   stops or removes the container on pi exit.
@@ -184,6 +195,6 @@ npm test           # node --test (unit tests, injected spawn — no devc/docker)
 
 The unit tests inject a fake spawn / runner, so they need neither `devc` nor
 Docker. The real end-to-end check is manual: run `pi -e …` against a project and
-confirm reads/writes/`bash` land inside the container (e.g. a file the agent
-writes is visible via `devc exec <project> -- cat …`), while bare `!` still runs
-on the host.
+confirm reads/writes/`bash`/`!` land inside the container (e.g. a file the
+agent writes is visible via `devc exec <project> -- cat …`), while `!!` still
+runs on the host.

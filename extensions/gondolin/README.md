@@ -17,8 +17,10 @@ host machine.
   pi's own docs directory on the host with no prompt.
 - Prompts before starting if you launch pi from your home directory (that
   would mount your entire home directory into the VM).
-
-Bare `!` commands you type yourself still run on your host, not the VM.
+- Routes `!` commands you type yourself into the VM too, matching the
+  agent's own `bash` tool. Use `!!` to run on the host instead — pi's own
+  "exclude this from the model's context" prefix doubles as the escape
+  hatch here.
 
 `grep` and `find` are implemented by walking the VM's filesystem directly,
 not by shelling out to `rg` — a fresh VM image isn't guaranteed to have `rg`

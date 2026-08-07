@@ -350,8 +350,26 @@ export default function (pi: ExtensionAPI) {
   // exception: unprompted directory listing, scoped to the same docs root.
   pi.registerTool(createListHostDocsTool(hostCwd, hostReadDeps));
 
-  // `user_bash` (bare `!`) is deliberately NOT routed — it is user-invoked and
-  // stays on the host as the user's own shell / escape hatch.
+  // `user_bash` fires for both `!` and `!!`. `!` is routed into the container
+  // like the LLM's own `bash` tool — the two should behave identically. `!!`
+  // (excludeFromContext, pi's own "don't show the model this" prefix) is the
+  // deliberate escape hatch that stays on the host, unrouted.
+  pi.on("user_bash", async (event, ctx) => {
+    if (event.excludeFromContext) return;
+
+    const active = await ensureContainerForTool(ctx);
+    if (!active.ok) {
+      return {
+        result: {
+          output: active.result.content.map((c) => c.text).join("\n"),
+          exitCode: 1,
+          cancelled: false,
+          truncated: false,
+        },
+      };
+    }
+    return { operations: createBashOperations(active.info, hostCwd, run) };
+  });
 
   pi.on("before_agent_start", async (event, ctx) => {
     let active: ContainerInfo;

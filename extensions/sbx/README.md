@@ -41,11 +41,22 @@ for the full "why a separate extension" reasoning.
 - Prompts for confirmation before starting the sandbox if pi was launched
   from the host's home directory itself (same rationale as devcontainer's
   check — see below).
+- Routes `user_bash` (the `!` prefix) into the sandbox too, matching the
+  LLM's own `bash` tool. `!!` is the escape hatch that stays on the host —
+  see below.
+
+### `!` vs `!!`
+
+- **`!`** runs in the sandbox, same as the agent's own `bash` tool — the
+  command shows up in the transcript / LLM context, same as any `!` command.
+- **`!!`** is **not** routed — it runs on the **host**, unrouted, using pi's
+  own local shell. This is the escape hatch for host-only operations (e.g.
+  managing the sandbox itself via `sbx`). `!!` is also pi's own "exclude
+  this from the model's context" prefix, so a `!!` command never reaches the
+  LLM either.
 
 ### What it deliberately does _not_ do
 
-- **`user_bash` (bare `!`) is not routed.** It is user-invoked and stays on
-  the host as your own shell / escape hatch.
 - **No sandbox lifecycle management beyond warm-up.** `sbx` sandboxes are
   user-managed; use `sbx stop` / `sbx rm` yourself. The extension never
   stops or removes the sandbox on pi exit.
@@ -243,7 +254,8 @@ extension's own automated test suite):**
   `read`/`write`/`edit`/`bash` — verify effects land **inside** the sandbox
   (e.g. a file the agent writes is visible via `sbx exec <derived-name> --
   cat …`, and a `bash` command uses the sandbox's toolchain).
-- Confirm bare `!echo $PATH` still runs on the **host**.
+- Confirm `!echo $PATH` runs **inside** the sandbox, and `!!echo $PATH`
+  still runs on the **host**.
 - Confirm `sbx ls` shows a sandbox named per `deriveSandboxName`'s scheme.
 - Confirm starting from `$HOME` triggers the confirmation prompt, and
   declining aborts with no sandbox created.
