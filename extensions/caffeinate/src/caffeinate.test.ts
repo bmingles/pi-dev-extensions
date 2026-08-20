@@ -47,8 +47,8 @@ test("isSupportedPlatform is true only for darwin", () => {
   assert.equal(isSupportedPlatform("win32"), false);
 });
 
-test("resolveArgs defaults to -i", () => {
-  assert.deepEqual(resolveArgs({}), ["-i"]);
+test("resolveArgs defaults to -dims", () => {
+  assert.deepEqual(resolveArgs({}), ["-d", "-i", "-m", "-s"]);
 });
 
 test("resolveArgs splits $PI_CAFFEINATE_ARGS on whitespace", () => {
@@ -60,7 +60,12 @@ test("resolveArgs splits $PI_CAFFEINATE_ARGS on whitespace", () => {
 });
 
 test("resolveArgs ignores a blank override", () => {
-  assert.deepEqual(resolveArgs({ PI_CAFFEINATE_ARGS: "   " }), ["-i"]);
+  assert.deepEqual(resolveArgs({ PI_CAFFEINATE_ARGS: "   " }), [
+    "-d",
+    "-i",
+    "-m",
+    "-s",
+  ]);
 });
 
 test("startCaffeinate spawns `caffeinate <args>`", () => {
@@ -74,7 +79,7 @@ test("startCaffeinate spawns `caffeinate <args>`", () => {
 test("startCaffeinate defaults to resolveArgs() when no args are given", () => {
   const { spawn, calls } = makeSpawn();
   startCaffeinate(undefined, spawn);
-  assert.deepEqual(calls[0].args, ["-i"]);
+  assert.deepEqual(calls[0].args, ["-d", "-i", "-m", "-s"]);
 });
 
 test("stop() kills the underlying child exactly once", () => {

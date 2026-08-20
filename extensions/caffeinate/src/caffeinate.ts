@@ -19,14 +19,15 @@ const defaultSpawn = nodeSpawn as unknown as SpawnFn;
 const BINARY = "caffeinate";
 
 /**
- * `-i` prevents idle sleep — the common "don't let the Mac nap while
- * something unattended is working" case — without forcing the display on or
- * overriding an explicit lid-close/battery choice (unlike `-d`/`-s`).
+ * `-dims` — matches the manual `caffeinate -dims` invocation this extension
+ * is meant to stand in for: `-d` keeps the display on, `-i` prevents idle
+ * sleep, `-m` prevents disk sleep, `-s` holds system sleep while on AC power.
+ * `-i` alone leaves the display and system free to sleep, which doesn't
+ * match "keep the machine awake and display showing" while an agent works.
  * Override via `$PI_CAFFEINATE_ARGS` (whitespace-split), e.g.
- * `PI_CAFFEINATE_ARGS="-d -i -s"` to also keep the display lit and hold
- * system sleep while on AC power.
+ * `PI_CAFFEINATE_ARGS="-i"` for the lighter idle-sleep-only behavior.
  */
-const DEFAULT_ARGS = ["-i"];
+const DEFAULT_ARGS = ["-d", "-i", "-m", "-s"];
 
 export function isSupportedPlatform(
   platform: NodeJS.Platform = process.platform,

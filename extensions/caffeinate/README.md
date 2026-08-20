@@ -8,8 +8,8 @@ whether it's currently holding the machine awake.
 
 ## What it does
 
-- On `agent_start`, spawns `caffeinate -i` (prevents idle sleep) if it isn't
-  already running.
+- On `agent_start`, spawns `caffeinate -dims` (keeps the display on, prevents
+  idle/disk/system sleep) if it isn't already running.
 - On `agent_settled` — the point at which pi is truly done and won't
   auto-retry, auto-compact, or continue with a queued message — kills it.
 - Also stops it on `session_shutdown`, so a live `caffeinate` process never
@@ -48,15 +48,15 @@ For auto-discovery / `/reload`, copy or symlink it into
 
 ### Overriding the `caffeinate` flags
 
-The default is `-i` (prevent idle sleep only — doesn't force the display on or
-override an explicit lid-close/battery choice). Override with
-`$PI_CAFFEINATE_ARGS` (whitespace-split), e.g.:
+The default is `-dims` (keep the display on; prevent idle, disk, and — while
+on AC power — system sleep), matching a manual `caffeinate -dims` invocation.
+Override with `$PI_CAFFEINATE_ARGS` (whitespace-split), e.g. to fall back to
+the lighter idle-sleep-only behavior (doesn't force the display on or
+override an explicit lid-close/battery choice):
 
 ```bash
-PI_CAFFEINATE_ARGS="-d -i -s" pi -e /path/to/pi-dev-extensions/extensions/caffeinate
+PI_CAFFEINATE_ARGS="-i" pi -e /path/to/pi-dev-extensions/extensions/caffeinate
 ```
-
-`-d` also keeps the display on; `-s` also holds system sleep while on AC power.
 
 ## Requirements
 
