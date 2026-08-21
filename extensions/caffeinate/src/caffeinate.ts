@@ -19,15 +19,21 @@ const defaultSpawn = nodeSpawn as unknown as SpawnFn;
 const BINARY = "caffeinate";
 
 /**
- * `-dims` — matches the manual `caffeinate -dims` invocation this extension
- * is meant to stand in for: `-d` keeps the display on, `-i` prevents idle
- * sleep, `-m` prevents disk sleep, `-s` holds system sleep while on AC power.
- * `-i` alone leaves the display and system free to sleep, which doesn't
- * match "keep the machine awake and display showing" while an agent works.
+ * `-i` prevents idle sleep — the main trigger that would suspend an
+ * unattended agent's process — on both AC and battery. `-s` adds narrower
+ * coverage for the same failure mode (system sleep) via a *scheduled* sleep
+ * (Energy Saver / `pmset repeat`), but only while on AC power.
+ *
+ * Deliberately excludes `-d` (display) and `-m` (disk): neither affects
+ * whether the agent's process keeps running — display sleep doesn't pause
+ * background work, and modern SSDs barely have a meaningful disk-sleep state
+ * that active agent I/O wouldn't already prevent on its own.
+ *
  * Override via `$PI_CAFFEINATE_ARGS` (whitespace-split), e.g.
- * `PI_CAFFEINATE_ARGS="-i"` for the lighter idle-sleep-only behavior.
+ * `PI_CAFFEINATE_ARGS="-d -i -m -s"` to also keep the display lit and hold
+ * disk sleep.
  */
-const DEFAULT_ARGS = ["-d", "-i", "-m", "-s"];
+const DEFAULT_ARGS = ["-i", "-s"];
 
 export function isSupportedPlatform(
   platform: NodeJS.Platform = process.platform,
