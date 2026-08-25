@@ -1,8 +1,12 @@
 /**
  * pi devcontainer extension — routes pi's built-in filesystem/shell tools into a
- * devcontainer via the `devc` CLI (Phase 26). Same shape as pi's gondolin
- * reference extension, but the isolation boundary is a long-lived devcontainer
- * rather than a per-session micro-VM.
+ * devcontainer (Phase 26). Same shape as pi's gondolin reference extension, but
+ * the isolation boundary is a long-lived devcontainer rather than a per-session
+ * micro-VM.
+ *
+ * The container is started and inspected in-process through `@devc-tools/core`
+ * (devc's own lifecycle logic, as a library); the routed commands run via
+ * `docker exec`. See `container.ts`.
  *
  * Reads and writes reflect the *container* filesystem — the authoritative view
  * the agent should see (in-container edits, build output, volume-mounted paths
@@ -13,7 +17,7 @@
  *   cd /path/to/project
  *   pi -e /path/to/pi-extensions/devcontainer
  *
- * Requires the `devc` binary on PATH.
+ * Requires Docker and Node — no `devc` binary on PATH.
  */
 
 import { homedir } from "node:os";
@@ -38,12 +42,13 @@ import {
 } from "pi-extension-host-read-core";
 import {
   type ContainerInfo,
-  devcUp,
-  getMounts as devcGetMounts,
-} from "./devc.ts";
+  ensureContainer as containerUp,
+  getMounts as containerGetMounts,
+} from "./container.ts";
 import { isHomeDirectory } from "./paths.ts";
 import {
   boundRun,
+  type ContainerRun,
   createBashOperations,
   createEditOperations,
   createFindOperations,
@@ -80,7 +85,6 @@ export default function (pi: ExtensionAPI) {
   // Captured once, at extension load, from pi's launch directory — the container
   // is resolved from it exactly as `devc attach` from that directory would.
   const hostCwd = process.cwd();
-  const run = boundRun(hostCwd);
 
   // Built-in tools instantiated against the host cwd, used only for their name +
   // schema when spreading into the overrides below.
@@ -100,7 +104,7 @@ export default function (pi: ExtensionAPI) {
   // way) so a decline/no-UI refusal isn't re-prompted on every tool call.
   let homeDirGate: "approved" | Error | undefined;
 
-  /** Lazily `devc up` once, cache the ContainerInfo anchor, reuse thereafter. */
+  /** Lazily start the container once, cache the ContainerInfo anchor, reuse thereafter. */
   async function ensureContainer(
     ctx?: ExtensionContext,
   ): Promise<ContainerInfo> {
@@ -157,7 +161,7 @@ export default function (pi: ExtensionAPI) {
           );
         }, 120);
         try {
-          const resolved = await devcUp(hostCwd);
+          const resolved = await containerUp(hostCwd);
           info = resolved;
           ctx?.ui.setStatus(
             "devcontainer",
@@ -182,21 +186,26 @@ export default function (pi: ExtensionAPI) {
 
   /**
    * `ensureContainer` for a tool's `execute`: never throws. A rejection
-   * (declined/no-UI home-dir confirmation, or a devc infra failure) becomes a
-   * plain tool-result error message instead of an uncaught exception — the
-   * model sees why the tool failed, and no raw stack trace reaches the
+   * (declined/no-UI home-dir confirmation, or a container infra failure)
+   * becomes a plain tool-result error message instead of an uncaught exception
+   * — the model sees why the tool failed, and no raw stack trace reaches the
    * session.
+   *
+   * The `ContainerRun` comes back with the info because it is built *from* it:
+   * `docker exec`'s argv needs the container id, so there is no runner to bind
+   * before the container resolves.
    */
   async function ensureContainerForTool(
     ctx?: ExtensionContext,
   ): Promise<
-    { ok: true; info: ContainerInfo } | {
+    { ok: true; info: ContainerInfo; run: ContainerRun } | {
       ok: false;
       result: { content: { type: "text"; text: string }[]; details: undefined };
     }
   > {
     try {
-      return { ok: true, info: await ensureContainer(ctx) };
+      const resolved = await ensureContainer(ctx);
+      return { ok: true, info: resolved, run: boundRun(resolved) };
     } catch (err) {
       return {
         ok: false,
@@ -213,7 +222,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     // ensureContainer can reject (declined/no-UI home-dir confirmation, or a
-    // devc infra failure). Letting that propagate out of a session_start
+    // container infra failure). Letting that propagate out of a session_start
     // handler dumps a raw stack trace into the session (pi's extension
     // runner renders uncaught handler errors that way) — surface it as a
     // plain notification instead.
@@ -256,7 +265,7 @@ export default function (pi: ExtensionAPI) {
       const active = await ensureContainerForTool(ctx);
       if (!active.ok) return active.result;
       const tool = createReadTool(active.info.remoteWorkspaceFolder, {
-        operations: createReadOperations(active.info, hostCwd, run),
+        operations: createReadOperations(active.info, hostCwd, active.run),
       });
       return tool.execute(id, params, signal, onUpdate);
     },
@@ -268,7 +277,7 @@ export default function (pi: ExtensionAPI) {
       const active = await ensureContainerForTool(ctx);
       if (!active.ok) return active.result;
       const tool = createWriteTool(active.info.remoteWorkspaceFolder, {
-        operations: createWriteOperations(active.info, hostCwd, run),
+        operations: createWriteOperations(active.info, hostCwd, active.run),
       });
       return tool.execute(id, params, signal, onUpdate);
     },
@@ -280,7 +289,7 @@ export default function (pi: ExtensionAPI) {
       const active = await ensureContainerForTool(ctx);
       if (!active.ok) return active.result;
       const tool = createEditTool(active.info.remoteWorkspaceFolder, {
-        operations: createEditOperations(active.info, hostCwd, run),
+        operations: createEditOperations(active.info, hostCwd, active.run),
       });
       return tool.execute(id, params, signal, onUpdate);
     },
@@ -292,7 +301,7 @@ export default function (pi: ExtensionAPI) {
       const active = await ensureContainerForTool(ctx);
       if (!active.ok) return active.result;
       const tool = createBashTool(active.info.remoteWorkspaceFolder, {
-        operations: createBashOperations(active.info, hostCwd, run),
+        operations: createBashOperations(active.info, hostCwd, active.run),
       });
       return tool.execute(id, params, signal, onUpdate);
     },
@@ -304,7 +313,7 @@ export default function (pi: ExtensionAPI) {
       const active = await ensureContainerForTool(ctx);
       if (!active.ok) return active.result;
       const tool = createLsTool(active.info.remoteWorkspaceFolder, {
-        operations: createLsOperations(active.info, hostCwd, run),
+        operations: createLsOperations(active.info, hostCwd, active.run),
       });
       return tool.execute(id, params, signal, onUpdate);
     },
@@ -316,7 +325,7 @@ export default function (pi: ExtensionAPI) {
       const active = await ensureContainerForTool(ctx);
       if (!active.ok) return active.result;
       const tool = createFindTool(active.info.remoteWorkspaceFolder, {
-        operations: createFindOperations(active.info, hostCwd, run),
+        operations: createFindOperations(active.info, hostCwd, active.run),
       });
       return tool.execute(id, params, signal, onUpdate);
     },
@@ -327,7 +336,13 @@ export default function (pi: ExtensionAPI) {
     async execute(_id, params, signal, _onUpdate, ctx) {
       const active = await ensureContainerForTool(ctx);
       if (!active.ok) return active.result;
-      return executeContainerGrep(active.info, hostCwd, params, signal, run);
+      return executeContainerGrep(
+        active.info,
+        hostCwd,
+        params,
+        signal,
+        active.run,
+      );
     },
   });
 
@@ -340,7 +355,7 @@ export default function (pi: ExtensionAPI) {
   // devcontainer-specific piece, passed in explicitly since the shared factories
   // have no default backend to fall back to.
   const hostReadDeps = {
-    getMounts: devcGetMounts,
+    getMounts: containerGetMounts,
     fs: realHostReadFs,
     unpromptedDocsPath: getDocsPath(),
   };
@@ -368,7 +383,9 @@ export default function (pi: ExtensionAPI) {
         },
       };
     }
-    return { operations: createBashOperations(active.info, hostCwd, run) };
+    return {
+      operations: createBashOperations(active.info, hostCwd, active.run),
+    };
   });
 
   pi.on("before_agent_start", async (event, ctx) => {

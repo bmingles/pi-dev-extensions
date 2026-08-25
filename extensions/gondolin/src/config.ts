@@ -9,7 +9,7 @@
  *
  * Resolution order (first match wins):
  * 1. `$PI_GONDOLIN_IMAGE` — a machine-local override for ad hoc / not-yet-
- *    committed testing, mirroring `extensions/devcontainer`'s `$DEVC_BIN`.
+ *    committed testing.
  * 2. `.pi/gondolin.json`'s `imagePath` field, in the project (`hostCwd`) —
  *    committed to the repo so every session (and every teammate) gets the
  *    same environment automatically, the role `.devcontainer/

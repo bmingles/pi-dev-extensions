@@ -3,8 +3,8 @@
  * each backed directly by the gondolin micro-VM's guest filesystem/exec API
  * (`VmLike`, a narrow structural slice of `@earendil-works/gondolin`'s real
  * `VM` — see `./vm.ts`). Unlike `pi-extensions/devcontainer` / `pi-extensions/
- * sbx`, there is no CLI spawn boundary to go through (`devc exec` / `sbx
- * exec`); every operation talks to the VM's own in-process API, ported from
+ * sbx`, there is no child-process boundary to go through (`docker exec` /
+ * `sbx exec`); every operation talks to the VM's own in-process API, ported from
  * `pi-extensions/gondolin-reference`'s inline implementation and split out
  * here so it's independently unit-testable against a fake `VmLike` instead of
  * a real micro-VM.

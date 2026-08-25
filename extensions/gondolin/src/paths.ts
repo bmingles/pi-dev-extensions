@@ -6,9 +6,9 @@
  * Ported from `pi-extensions/devcontainer/src/paths.ts` — same shape, with
  * `remoteWorkspaceFolder` replaced by the constant guest workspace root:
  * gondolin's mount point never varies session to session (unlike a
- * devcontainer's `remoteWorkspaceFolder`, which `devc up` resolves fresh each
- * time), so callers pass it in rather than reading it off a resolved info
- * object.
+ * devcontainer's `remoteWorkspaceFolder`, which starting the container
+ * resolves fresh each time), so callers pass it in rather than reading it off
+ * a resolved info object.
  */
 
 import path from "node:path";

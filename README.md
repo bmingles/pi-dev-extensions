@@ -27,8 +27,10 @@ environment, plus keeping the host machine awake while pi works unattended:
   a floor). `extensions/gondolin` needs a newer floor still — see below.
 - Node.js ≥ 23.6.0 and QEMU installed for `extensions/gondolin` specifically
   (`@earendil-works/gondolin`'s own requirements)
-- `devc` on `PATH` for `extensions/devcontainer`; `sbx` on `PATH` for
-  `extensions/sbx` (see each package's README)
+- Docker (a running daemon and the `docker` CLI) for
+  `extensions/devcontainer` — it drives the container lifecycle in-process via
+  its `@devc-tools/core` npm dependency, so no `devc` binary is needed; `sbx`
+  on `PATH` for `extensions/sbx` (see each package's README)
 
 ## Shell setup
 
@@ -40,14 +42,10 @@ works from any directory. Source it from your `~/.bashrc` or `~/.zshrc`:
 source /path/to/pi-dev-extensions/scripts/bash_aliases_pic.sh
 ```
 
-It has no knowledge of where `devc` comes from — the `devcontainer`
-extension invokes plain `devc` on `PATH` by default, or `$DEVC_BIN` if set;
-see [`extensions/devcontainer/README.md`](extensions/devcontainer/README.md).
-If you run `devc` from source (e.g. from an `agent-tools` checkout) rather
-than a compiled binary, source `agent-tools/scripts/bash_aliases_devc.sh` in
-your shell profile too — it exports `$DEVC_BIN` for you, so no manual export
-is needed. Without it, `devc` being a bash function is not enough: pi spawns
-`devc` as a real child process, which never sees shell functions.
+Nothing else has to be on `PATH` for the `devcontainer` extension beyond
+`docker`: the container lifecycle comes from its `@devc-tools/core` npm
+dependency, running in pi's own Node process. See
+[`extensions/devcontainer/README.md`](extensions/devcontainer/README.md).
 
 ## Package layout
 
@@ -132,7 +130,8 @@ cd /path/to/project
 pi -e /path/to/pi-dev-extensions/extensions/devcontainer
 ```
 
-Its only runtime dependency is the `devc` binary on `PATH`. See
+Its only runtime dependency is Docker — the container lifecycle is driven
+in-process through `@devc-tools/core`, with no `devc` binary involved. See
 [`extensions/devcontainer/README.md`](extensions/devcontainer/README.md) for
 details and `npm run typecheck` / `npm test`.
 
@@ -162,8 +161,8 @@ pi -e /path/to/pi-dev-extensions/extensions/sbx
 ```
 
 Its only runtime dependency is the `sbx` binary on `PATH` — always invoked
-from `PATH`, no `$DEVC_BIN`-style override (unlike `devc`, `sbx` is purely an
-external Docker Desktop binary). See
+from `PATH`, with no override (unlike the devcontainer extension, `sbx` is
+driven as an external Docker Desktop binary, not as a library). See
 [`extensions/sbx/README.md`](extensions/sbx/README.md) for details, including
 the CLI-flag assumptions this extension makes (drawn from `docs.docker.com`,
 not a live binary — flagged there for verification), and `npm run typecheck`

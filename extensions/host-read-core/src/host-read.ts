@@ -24,8 +24,8 @@ import { Type } from "typebox";
 import { type HostFs, isInside, resolveHostPath } from "./resolve-host.ts";
 
 /**
- * One entry of a backend's mount table. Shape mirrors `devc mounts --json`'s
- * `ContainerMount` (devcontainer's own `HostMount`, Phase 26), but this type
+ * One entry of a backend's mount table. Shape mirrors `@devc-tools/core`'s
+ * `ContainerMount` (what devcontainer's `getMounts` converts from), but this type
  * has no dependency on `devc` or any other backend — every consumer supplies
  * its own `getMounts` returning this shape.
  */

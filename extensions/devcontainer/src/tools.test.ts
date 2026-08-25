@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { ContainerInfo, RunOptions, RunResult } from "./devc.ts";
+import type { ContainerInfo, RunOptions, RunResult } from "./container.ts";
 import {
   type ContainerRun,
   createBashOperations,
@@ -112,7 +112,7 @@ test("bash.exec issues `bash -lc <cmd>`, threads cwd, and never forwards host en
   const ops = createBashOperations(INFO, HOST, run);
   const chunks: Buffer[] = [];
   // `env` here stands in for pi's host-sourced env (see bash.js's
-  // resolveSpawnContext) — it must never reach `devc exec`, so the container
+  // resolveSpawnContext) — it must never reach `docker exec`, so the container
   // gets whatever standard `docker exec` sets up (e.g. its own $HOME).
   const result = await ops.exec("echo hi", "sub", {
     onData: (d) => chunks.push(d),

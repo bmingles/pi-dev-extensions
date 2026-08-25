@@ -1,6 +1,7 @@
 /**
  * `*Operations` implementations matching pi's exported operation interfaces,
- * each backed by `runInContainer` (i.e. `devc exec`). These are the seam pi's
+ * each backed by `runInContainer` (i.e. `docker exec` into the devcontainer).
+ * These are the seam pi's
  * `create*Tool({ operations })` factories plug into, so the built-in tools'
  * names, schemas, and output formatting are reused while the actual filesystem
  * / shell work happens inside the devcontainer.
@@ -29,20 +30,24 @@ import {
   runInContainer,
   type RunOptions,
   type RunResult,
-} from "./devc.ts";
+} from "./container.ts";
 import { toContainerPath } from "./paths.ts";
 
 const DEFAULT_GREP_LIMIT = 100;
 
-/** A `runInContainer` already bound to a host cwd; injectable for tests. */
+/** A `runInContainer` already bound to a container; injectable for tests. */
 export type ContainerRun = (
   argv: string[],
   opts?: RunOptions,
 ) => Promise<RunResult>;
 
-/** Default runner: `devc exec <hostCwd> -- <argv…>`. */
-export function boundRun(hostCwd: string): ContainerRun {
-  return (argv, opts) => runInContainer(hostCwd, argv, opts);
+/**
+ * Default runner: `docker exec` into the already-resolved container. Bound to
+ * the `ContainerInfo` rather than to a host path, because that is what the argv
+ * is built from — there is no second lookup per call.
+ */
+export function boundRun(info: ContainerInfo): ContainerRun {
+  return (argv, opts) => runInContainer(info, argv, opts);
 }
 
 function map(info: ContainerInfo, hostCwd: string, p: string): string {
@@ -56,7 +61,7 @@ function decode(bytes: Uint8Array): string {
 export function createReadOperations(
   info: ContainerInfo,
   hostCwd: string,
-  run: ContainerRun = boundRun(hostCwd),
+  run: ContainerRun = boundRun(info),
 ): ReadOperations {
   return {
     readFile: async (filePath) => {
@@ -93,7 +98,7 @@ export function createReadOperations(
 export function createWriteOperations(
   info: ContainerInfo,
   hostCwd: string,
-  run: ContainerRun = boundRun(hostCwd),
+  run: ContainerRun = boundRun(info),
 ): WriteOperations {
   return {
     writeFile: async (filePath, content) => {
@@ -125,7 +130,7 @@ export function createWriteOperations(
 export function createEditOperations(
   info: ContainerInfo,
   hostCwd: string,
-  run: ContainerRun = boundRun(hostCwd),
+  run: ContainerRun = boundRun(info),
 ): EditOperations {
   const read = createReadOperations(info, hostCwd, run);
   const write = createWriteOperations(info, hostCwd, run);
@@ -139,7 +144,7 @@ export function createEditOperations(
 export function createLsOperations(
   info: ContainerInfo,
   hostCwd: string,
-  run: ContainerRun = boundRun(hostCwd),
+  run: ContainerRun = boundRun(info),
 ): LsOperations {
   return {
     exists: async (filePath) => {
@@ -180,7 +185,7 @@ function matchesToolGlob(relativePath: string, pattern: string): boolean {
 export function createFindOperations(
   info: ContainerInfo,
   hostCwd: string,
-  run: ContainerRun = boundRun(hostCwd),
+  run: ContainerRun = boundRun(info),
 ): FindOperations {
   return {
     exists: async (filePath) => {
@@ -212,15 +217,15 @@ export function createFindOperations(
 export function createBashOperations(
   info: ContainerInfo,
   hostCwd: string,
-  run: ContainerRun = boundRun(hostCwd),
+  run: ContainerRun = boundRun(info),
 ): BashOperations {
   return {
     // `env` (from pi's built-in bash tool) is deliberately ignored: it is always
     // sourced from *this* process's host environment (see pi's
     // `resolveSpawnContext`/`getShellEnv`), never from anything container-aware.
-    // Forwarding it as `devc exec --env` would clobber the container's own
-    // environment (e.g. $HOME) with host values. No `--env` flags means `devc
-    // exec` gets whatever standard `docker exec` sets up for the container.
+    // Forwarding it as `docker exec -e` would clobber the container's own
+    // environment (e.g. $HOME) with host values. Passing no extra env means the
+    // command gets whatever the container's own remoteEnv sets up.
     exec: async (command, cwd, { onData, signal, timeout }) => {
       if (signal?.aborted) throw new Error("aborted");
       const containerCwd = map(info, hostCwd, cwd);
@@ -275,7 +280,7 @@ export async function executeContainerGrep(
   hostCwd: string,
   params: GrepToolInput,
   _signal?: AbortSignal,
-  run: ContainerRun = boundRun(hostCwd),
+  run: ContainerRun = boundRun(info),
 ): Promise<TextToolResult<GrepToolDetails>> {
   const containerPath = map(info, hostCwd, params.path ?? ".");
   const rwf = info.remoteWorkspaceFolder;
@@ -371,4 +376,3 @@ export async function executeContainerGrep(
     details: Object.keys(details).length > 0 ? details : undefined,
   };
 }
-

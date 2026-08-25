@@ -4,7 +4,8 @@
  *
  * Mirrors gondolin's `toGuestPath`, but with `remoteWorkspaceFolder` as the
  * guest root instead of a hard-coded `/workspace` (the devcontainer workspace
- * folder is whatever `devc up` reports — it differs for git worktrees).
+ * folder is whatever starting the container reports — it differs for git
+ * worktrees).
  */
 
 import path from "node:path";

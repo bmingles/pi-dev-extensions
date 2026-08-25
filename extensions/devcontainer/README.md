@@ -2,26 +2,29 @@
 
 A [pi](https://github.com/earendil-works) coding-agent extension that runs `pi`
 on the **host** and routes its built-in filesystem/shell tools into a
-**devcontainer** via the [`devc`](https://github.com/emeraldwalk/agent-tools/tree/main/devc)
-CLI (a separate repo — see Requirements below).
+**devcontainer**. The container's lifecycle is driven **in-process** through
+[`@devc-tools/core`](https://github.com/bmingles/devc-tools/tree/main/devc-core)
+— devc's own start/mounts logic as an npm library — and the routed commands run
+via `docker exec`. There is no `devc` binary to install (see Requirements
+below).
 
 It is the same shape as pi's bundled
 [`gondolin`](https://github.com/earendil-works/gondolin) example (which routes
 into a micro-VM), but the isolation boundary here is a long-lived devcontainer
-managed by `devc`.
+of the kind `devc` manages.
 
 ## What it does
 
 - Overrides seven built-in tools — `read`, `write`, `edit`, `bash`, `grep`,
-  `find`, `ls` — so each runs inside the container (`devc exec`) instead of on
-  the host.
+  `find`, `ls` — so each runs inside the container (`docker exec`) instead of
+  on the host.
 - Reads and writes therefore reflect the **container's** filesystem: the
   authoritative view the agent should see — in-container edits, build output,
   and volume-mounted paths like `node_modules` the host can't see — with no
   per-operation permission prompts.
-- Warms the container at session start (`devc up`), caches the resolved
-  `remoteWorkspaceFolder` as the path anchor, and patches the system prompt so
-  the model treats the cwd as the container workspace.
+- Warms the container at session start (core's `startContainer`), caches the
+  resolved `remoteWorkspaceFolder` as the path anchor, and patches the system
+  prompt so the model treats the cwd as the container workspace.
 - Adds two **new** tools: `read_host`, the escape hatch that reads the
   **host** filesystem, and `list_host_docs`, an unprompted listing counterpart
   scoped to pi's own docs directory (see below).
@@ -37,15 +40,16 @@ managed by `devc`.
   command shows up in the transcript / LLM context, same as any `!` command.
 - **`!!`** is **not** routed — it runs on the **host**, unrouted, using pi's
   own local shell. This is the escape hatch for host-only operations (e.g.
-  managing the container itself via `devc`). `!!` is also pi's own
-  "exclude this from the model's context" prefix, so a `!!` command never
-  reaches the LLM either.
+  managing the container itself with the `devc` CLI, if you have it). `!!` is
+  also pi's own "exclude this from the model's context" prefix, so a `!!`
+  command never reaches the LLM either.
 
 ### What it deliberately does _not_ do
 
-- **No container lifecycle management beyond warm-up.** devc containers are
-  long-lived; use `devc stop` / `devc down` to manage them. The extension never
-  stops or removes the container on pi exit.
+- **No container lifecycle management beyond warm-up.** These containers are
+  long-lived; stop or remove them yourself (`devc stop` / `devc down`, or
+  `docker stop` / `docker rm`). The extension never stops or removes the
+  container on pi exit.
 
 ## `read_host` — the gated host-read escape hatch
 
@@ -57,8 +61,9 @@ The tool factory, the per-hop symlink-safe mount barrier it's built on, and
 its `list_host_docs` counterpart below all live in the shared
 [`pi-extension-host-read-core`](../host-read-core) package (Phase 30), not in
 this extension — this section documents the tools' behavior as *this*
-extension instantiates them (`getMounts` backed by `devc mounts`); see that
-package's README for the shared machinery itself.
+extension instantiates them (`getMounts` backed by core's
+`getContainerMounts`); see that package's README for the shared machinery
+itself.
 
 - **Parameters:** `{ path }` — an absolute host path.
 - **Confirmation:** prompts (`ctx.ui.confirm`) before reading, **showing the
@@ -118,8 +123,9 @@ source. Symlink loops are capped and rejected. Examples of what is refused:
   outside mounts, but resolution _transits_ the container-writable
   `<mount>/leak2` and is rejected.
 
-The mount set is the **current container's** mounts only (from `devc mounts`).
-The **cross-container / poison-then-teardown** case — a bind source's bytes
+The mount set is the **current container's** mounts only (from core's
+`getContainerMounts`, i.e. `docker inspect`). The **cross-container /
+poison-then-teardown** case — a bind source's bytes
 persisting on the host after its container is removed — is knowingly out of
 scope for v1; a persisted taint set would be the durable fix (future phase).
 
@@ -164,16 +170,15 @@ folders.
 
 ## Requirements
 
-- **`devc`** (see [`emeraldwalk/agent-tools`](https://github.com/emeraldwalk/agent-tools/tree/main/devc),
-  a separate repo — this extension has no source dependency on it, only a
-  runtime one) — the extension's only runtime dependency. By default it is
-  spawned as a `devc` binary on `PATH`. To use a non-compiled devc (run from
-  source), set **`$DEVC_BIN`** to the full invocation instead, e.g.
-  `DEVC_BIN="deno run --allow-run=docker,devcontainer,git,tmux,tty --allow-read --allow-write --allow-env /path/to/agent-tools/devc/main.ts"`.
-  The value is whitespace-split (first token = executable, the rest are prepended
-  before each devc subcommand); paths with spaces need a compiled binary.
-  `agent-tools/scripts/bash_aliases_devc.sh` exports this for you — source it
-  in your shell profile instead of setting `$DEVC_BIN` by hand.
+- **Docker** — a running daemon and the `docker` CLI. That is the whole
+  runtime story: the container lifecycle comes from the `@devc-tools/core` npm
+  dependency (which carries the devcontainer CLI as a dependency of its own and
+  runs it with this same Node), and the routed commands are `docker exec`. No
+  `devc` binary on `PATH`, and no environment-variable override pointing at
+  one — both are gone. The
+  [`devc`](https://github.com/bmingles/devc-tools/tree/main/devc) CLI is
+  still useful alongside this extension (`devc stop`, `devc down`,
+  `devc config`), but it is complementary, not required.
 - **Node.js ≥ 22.19.0** — native `.ts` type-stripping (no build step) needs
   Node's default-on stripping support (22.18.0+); this package's source uses
   no non-erasable TS syntax, so the extra `--experimental-transform-types`
@@ -190,11 +195,16 @@ once.
 ```bash
 npm install        # install pi (types) + typescript + @types/node (dev only)
 npm run typecheck  # tsc --noEmit against pi's real types
-npm test           # node --test (unit tests, injected spawn — no devc/docker)
+npm test           # node --test (unit tests, injected spawn — no docker)
 ```
 
-The unit tests inject a fake spawn / runner, so they need neither `devc` nor
-Docker. The real end-to-end check is manual: run `pi -e …` against a project and
-confirm reads/writes/`bash`/`!` land inside the container (e.g. a file the
-agent writes is visible via `devc exec <project> -- cat …`), while `!!` still
-runs on the host.
+`@devc-tools/core` is a normal npm dependency of this package, pinned to an
+exact version: it is pre-1.0, and the pieces consumed here (`buildExecArgs`,
+`startContainer`'s `StartOptions`) are not a stability promise yet.
+
+The unit tests inject a fake spawn for `docker exec` and a fake
+`startContainer` / devcontainer runner for the lifecycle, so they need neither
+Docker nor a real container. The real end-to-end check is manual: run
+`pi -e …` against a project and confirm reads/writes/`bash`/`!` land inside the
+container (e.g. a file the agent writes is visible via
+`docker exec <id> cat …`), while `!!` still runs on the host.

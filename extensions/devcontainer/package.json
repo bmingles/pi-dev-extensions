@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@devc-tools/core": "0.1.0",
     "pi-extension-host-read-core": "file:../host-read-core"
   },
   "peerDependencies": {

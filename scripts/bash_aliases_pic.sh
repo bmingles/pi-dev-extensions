@@ -13,12 +13,10 @@ _PI_DEV_EXTENSIONS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." >/dev/null 2>&1
 # works from anywhere.
 # One-time setup: `(cd "$_PI_DEV_EXTENSIONS_DIR" && npm install)`.
 #
-# This script knows nothing about where `devc` comes from — the devcontainer
-# extension invokes plain `devc` on PATH by default, or $DEVC_BIN if set (see
-# extensions/devcontainer/README.md). If you run devc from source instead of
-# a compiled binary, source agent-tools' own bash_aliases_devc.sh in your
-# .bashrc *before* this script — it exports $DEVC_BIN for you, so pic() picks
-# it up with no further setup here.
+# Nothing beyond `docker` has to be on PATH: the devcontainer extension drives
+# the container lifecycle in-process via its @devc-tools/core npm dependency
+# (see extensions/devcontainer/README.md), so there is no `devc` binary for
+# this script to find or configure.
 
 function _pic_resolve_pi() {
   # Fast path: whatever node version is currently active in this shell.

@@ -89,8 +89,9 @@ the tools' user-facing behavior (identical here).
 
 ### How the single-mount model simplifies the barrier vs. devcontainer's
 
-`extensions/devcontainer`'s `getMounts` calls `devc mounts <hostCwd>
---json` — a dynamic, N-entry table (bind + volume mounts) that can change
+`extensions/devcontainer`'s `getMounts` reads the container's mounts through
+`@devc-tools/core` — a dynamic, N-entry table (bind + volume mounts) that can
+change
 between sandboxed runs. `extensions/sbx`'s `getMounts` (in `src/tools.ts`)
 needs **no `sbx` call at all**: `sbx` mounts the entire workspace 1:1 at
 `hostCwd`, so the mount table is always exactly the single, statically-known

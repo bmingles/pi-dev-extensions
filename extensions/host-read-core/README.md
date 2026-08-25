@@ -30,12 +30,13 @@ Both tool factories take a `getMounts: (hostCwd: string) => Promise<HostMount[]>
 dependency, and — unlike this package's own two consumers' historical
 default — **it has no default here**. Every consumer must supply its own:
 
-- devcontainer's calls `devc mounts <hostCwd> --json` (a dynamic, N-entry
-  table reflecting whatever the container actually has mounted).
+- devcontainer's reads the container's mounts through `@devc-tools/core` (a
+  dynamic, N-entry table reflecting whatever the container actually has
+  mounted).
 - sbx's (Phase 31) is a static one-entry list, since sbx mounts the workspace
   1:1 at `hostCwd` with no dynamic mount table to query.
 
-Defaulting `getMounts` to a devc-specific function would leak a backend
+Defaulting `getMounts` to a devcontainer-specific function would leak a backend
 dependency into a package meant to have none — a consumer that forgets to
 pass it gets a TypeScript compile error (missing required property on
 `ReadHostDeps`/`ListHostDocsDeps`), not a silent fallback to some other

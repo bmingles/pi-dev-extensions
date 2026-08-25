@@ -5,9 +5,10 @@
  * commands inside it (`sbx exec`). The spawner is injectable so tests can
  * assert the exact argv without a real `sbx` binary.
  *
- * Unlike `devc` (this repo's own CLI), `sbx` is purely an external Docker
- * Desktop binary — always invoked as `sbx` from PATH, no `$DEVC_BIN`-style
- * override, and no infra-vs-command exit-code sentinel (see the plan's
+ * Unlike `extensions/devcontainer` (which drives its container in-process
+ * through the `@devc-tools/core` library), `sbx` is purely an external Docker
+ * Desktop binary — always invoked as `sbx` from PATH, with no override, and
+ * no infra-vs-command exit-code sentinel (see the plan's
  * Concept boundaries): `runInSandbox` always resolves with the routed
  * command's real exit code, never rejecting on a non-zero exit.
  */
