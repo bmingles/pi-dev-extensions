@@ -317,17 +317,21 @@ since it owns the process for its lifetime.
       mentions in `gondolin/src/{config,paths,tools}.ts`,
       `sbx/src/sbx.ts` and `host-read-core/src/host-read.ts` — comment-only,
       found by grep, not in the plan's touchpoints table
-- [ ] **Last, gated on the publish:** `"@devc-tools/core": "0.1.0"` (exact —
+- [x] **Last, gated on the publish:** `"@devc-tools/core": "0.1.0"` (exact —
       core is pre-1.0 and `buildExecArgs` is not a stability promise) and a
-      regenerated root `package-lock.json`. **Half done, deliberately.**
-      `package.json` carries the exact version already — that is the intended
-      final state — but `@devc-tools/core` is not published, so the committed
-      `package-lock.json` is the pre-change one and a from-clean
-      `npm install` **will fail** until the publish. Local work used an
-      `npm pack`ed tarball installed into `node_modules`; no `file:` or
-      `.tgz` path is committed. Regenerate the lockfile when publishing.
+      regenerated root `package-lock.json`. Done: `@devc-tools/core@0.1.0` is
+      published, and the committed lockfile resolves it from the registry
+      (`registry.npmjs.org/@devc-tools/core/-/core-0.1.0.tgz`), so a
+      from-clean `npm install` works. No `file:` or `.tgz` path was ever
+      committed; the pre-publish local work used an `npm pack`ed tarball
+      installed with `--no-save`.
 
 ## Validation
+
+The unchecked items below were the ones this environment could not run
+(no Docker daemon, no live pi session). They were validated by the author in a
+real session after the publish; the per-item notes are kept as a record of what
+automated coverage stands behind each one.
 
 - [x] `npm run typecheck` and `npm test` in `extensions/devcontainer` (38
       passing, up from 34) plus every other workspace package —
