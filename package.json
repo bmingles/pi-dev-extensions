@@ -8,7 +8,8 @@
       "extensions/devcontainer/src/index.ts",
       "extensions/sbx/src/index.ts",
       "extensions/gondolin/src/index.ts",
-      "extensions/caffeinate/src/index.ts"
+      "extensions/caffeinate/src/index.ts",
+      "extensions/herdr-worktrees/src/index.ts"
     ]
   }
 }

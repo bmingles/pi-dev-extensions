@@ -1,8 +1,10 @@
 # pi-dev-extensions
 
-A [pi](https://github.com/earendil-works) coding-agent package bundling five
+A [pi](https://github.com/earendil-works) coding-agent package bundling six
 Node/TypeScript extensions for routing pi's tools through an isolated dev
-environment, plus keeping the host machine awake while pi works unattended:
+environment, keeping the host machine awake while pi works unattended, and
+(for a pi running inside a devcontainer) creating Herdr worktrees under this
+host's layout:
 
 - **[`extensions/devcontainer`](#extensionsdevcontainer)** — routes pi's
   built-in tools into a devcontainer via `devc`
@@ -12,6 +14,10 @@ environment, plus keeping the host machine awake while pi works unattended:
   tools into a local gondolin micro-VM instead of a devcontainer or sandbox
 - **[`extensions/caffeinate`](#extensionscaffeinate)** — keeps the Mac awake
   (`caffeinate`) while an agent run is active
+- **[`extensions/herdr-worktrees`](#extensionsherdr-worktrees)** — for a pi
+  running **inside** a devcontainer alongside `pi-herdr`: derives a safe
+  `herdr worktree create --path` under the `<repo>.worktrees/<branch>`
+  sibling convention and guards against one that isn't bind-mounted
 - **[`extensions/host-read-core`](#extensionshost-read-core)** — a shared
   library (not independently `pi -e`-loadable) providing the
   `read_host`/`list_host_docs` tool machinery consumed by `devcontainer`,
@@ -225,6 +231,46 @@ it no-ops with a status message instead of failing. See
 [`extensions/caffeinate/README.md`](extensions/caffeinate/README.md) for
 details, the `$PI_CAFFEINATE_ARGS` override, and `npm run typecheck` /
 `npm test`.
+
+---
+
+## `extensions/herdr-worktrees`
+
+A pi coding-agent extension for a pi **orchestrator running inside a
+devcontainer**, alongside [`pi-herdr`](https://github.com/AndrewJacop/pi-herdr).
+It registers two additive tools — `herdr_devc_worktree_path` (pure: derive
+and validate where a worktree would go) and `herdr_devc_worktree_create`
+(create it) — that fill the one gap `pi-herdr` leaves for this host's
+layout: `herdr worktree create`'s default location comes from Herdr's own
+single global `worktrees.directory` root, which cannot express this
+repo-set's `<repo>.worktrees/<branch>` sibling convention, so `--path` must
+be derived and passed explicitly on every call. More importantly, a `--path`
+outside a bind mount is not rejected — Herdr `mkdir -p`s the missing parent
+and reports success, producing a checkout that lives only in the container's
+writable layer and is invisible to the host. `herdr_devc_worktree_path`'s
+`NOT_A_MOUNT` check (reading `/proc/mounts`, not `existsSync`) is what turns
+that into a caught error instead of a silent, host-invisible checkout.
+
+> **Not** part of the `devcontainer`/`sbx`/`gondolin` mutual-exclusion group
+> above. Those three run pi on the **host** and override built-in tools to
+> route them **into** an isolated environment; this extension runs as part
+> of a pi already **inside** one and registers two new tools, overriding
+> nothing. See its own README for the full reasoning.
+
+```bash
+# inside a devcontainer, in a Herdr pane
+pi -e /path/to/pi-dev-extensions/extensions/herdr-worktrees -e <path-to-pi-herdr>
+```
+
+Its only runtime dependency is the `herdr` binary (resolved via
+`HERDR_BIN_PATH` -> `HERDR_BIN` -> `PATH` -> bare `herdr`) — no code
+dependency on `pi-herdr` itself, by design. See
+[`extensions/herdr-worktrees/README.md`](extensions/herdr-worktrees/README.md)
+for the full path rule, the tool contracts, and `npm run typecheck` / `npm
+test` (offline, fixture-driven — no Herdr server needed). The end-to-end
+workflow (starting Herdr, the orchestrator, and a worked
+create-and-delegate example) lives in `devc-dev`'s
+`docs/orchestrator-workflow.md`.
 
 ---
 
