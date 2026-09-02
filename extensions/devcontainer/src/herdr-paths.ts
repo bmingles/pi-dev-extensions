@@ -18,31 +18,10 @@
  * Pure given the mount table and the two injected probes — no `docker`, no `herdr`, no pi.
  */
 
-import { join, resolve } from "node:path";
-import { deriveWorktreeLayout } from "pi-extension-herdr-core";
+import { resolve } from "node:path";
+import { deriveWorktreeLayout, expandTilde } from "pi-extension-herdr-core";
 import type { ContainerMount } from "@devc-tools/core";
 import { findMountForHostPath, hostToContainerPath } from "@devc-tools/core";
-
-/**
- * Expand a leading `~` against the host's home directory.
- *
- * These tools are called by a **model**, not by a shell, so nothing upstream expands a
- * tilde: `resolve(hostCwd, "~/code/x")` treats `~` as an ordinary path segment and silently
- * produces `<hostCwd>/~/code/x`. Measured on a real host run — a model asked for
- * `repo: ~/code/tools/devc-tools` and got NOT_A_REPO naming a nonsense joined path.
- *
- * A CLI would be wrong to do this (the shell owns tilde expansion, and a literal `~` file
- * is legal), which is why `devc`'s own `--cwd` deliberately does not — but here there is no
- * shell in the loop at all.
- *
- * `~user/...` is left alone: resolving it needs a passwd lookup, and guessing
- * `<home's parent>/user` would be wrong on macOS as often as not.
- */
-export function expandTilde(p: string, home: string): string {
-  if (p === "~") return home;
-  if (p.startsWith("~/")) return join(home, p.slice(2));
-  return p;
-}
 
 export type HerdrPathErrorCode =
   | "NOT_A_REPO"

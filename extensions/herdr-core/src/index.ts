@@ -15,6 +15,7 @@
 
 export * from "./herdr-bin.ts";
 export * from "./herdr-cli.ts";
+export * from "./tilde.ts";
 export * from "./tool-result.ts";
 export * from "./worktree-create.ts";
 export * from "./worktree-layout.ts";

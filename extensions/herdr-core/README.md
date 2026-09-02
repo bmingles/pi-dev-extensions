@@ -32,6 +32,7 @@ differ, and those stay in the two consumers.
 | `tool-result.ts` | `okResult`, `errorResult`, `ToolResultWithError` |
 | `worktree-create.ts` | `createWorktreeArgs`, `CreateWorktreeArgsOpts`, `extractWorktree`, `NormalizedWorktree` |
 | `worktree-layout.ts` | `slugify`, `deriveWorktreeLayout`, `WorktreeLayout` |
+| `tilde.ts` | `expandTilde` — both sides take path parameters from a model, and neither has a shell in the loop to expand `~` |
 
 ### The one place a bare `path` is correct
 

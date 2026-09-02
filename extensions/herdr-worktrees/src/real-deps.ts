@@ -6,6 +6,7 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { homedir } from "node:os";
 import { existsSync, readFileSync } from "node:fs";
 import type { ResolveDeps } from "./worktree-path.ts";
 
@@ -47,4 +48,5 @@ export const realResolveDeps: ResolveDeps = {
   readMounts: realReadMounts,
   isContainer: realIsContainer,
   pathExists: realPathExists,
+  homedir: homedir(),
 };

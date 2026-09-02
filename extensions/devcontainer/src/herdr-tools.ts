@@ -26,6 +26,7 @@ import { Type } from "typebox";
 import {
   createWorktreeArgs,
   errorResult,
+  expandTilde,
   extractWorktree,
   type HerdrResult,
   okResult,
@@ -43,7 +44,6 @@ import {
   paneSplitArgs,
 } from "./herdr-launch.ts";
 import {
-  expandTilde,
   type HerdrPathDeps,
   type HerdrPathErrorCode,
   resolveHerdrWorktreePath,

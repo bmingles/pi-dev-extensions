@@ -40,6 +40,7 @@ function fakeDeps(overrides: Partial<ResolveDeps> = {}): ResolveDeps {
     readMounts: () => FIXTURE_MOUNTS,
     isContainer: () => true,
     pathExists: () => false,
+    homedir: "/home/vscode",
     ...overrides,
   };
 }
@@ -130,4 +131,22 @@ test("resolveWorktreePath: repo param is resolved relative to cwd before git rev
   );
   assert.equal(seenCwd, "/workspaces/tools/devc-tools/subdir");
   assert.equal(result.ok, true);
+});
+
+test("resolveWorktreePath: a ~ repo is expanded, not joined onto the cwd", () => {
+  // Same defect the host-side tools had: this is a tool parameter filled in by a model,
+  // and no shell is in the loop to expand the tilde. Without expansion this asks git about
+  // '/workspaces/tools/myrepo/~/project' and fails as NOT_A_REPO.
+  let seenCwd = "";
+  resolveWorktreePath(
+    { repo: "~/project", branch: "feat-a" },
+    "/workspaces/tools/myrepo",
+    fakeDeps({
+      gitRevParseTopLevel: (cwd) => {
+        seenCwd = cwd;
+        return "/home/vscode/project";
+      },
+    }),
+  );
+  assert.equal(seenCwd, "/home/vscode/project");
 });

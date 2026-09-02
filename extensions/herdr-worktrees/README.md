@@ -41,7 +41,8 @@ the other.
 
 The pieces both families need — `resolveHerdrBin`, `runHerdr`, the
 `okResult`/`errorResult` helpers, `createWorktreeArgs`/`extractWorktree`, and
-the `<repo>.worktrees/<slug>` derivation (`slugify`, `deriveWorktreeLayout`) —
+the `<repo>.worktrees/<slug>` derivation (`slugify`, `deriveWorktreeLayout`),
+and `expandTilde` —
 live in [`pi-extension-herdr-core`](../herdr-core), a private library package
 with no `pi.extensions` key. Only the **guard** differs between the two
 topologies, so only the guard stayed here, in `src/worktree-path.ts`.

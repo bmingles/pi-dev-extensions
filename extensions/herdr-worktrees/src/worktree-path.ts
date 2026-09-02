@@ -25,7 +25,7 @@ import { normalize, resolve } from "node:path";
 // The `<repo>.worktrees/<slug>` rule and its branch slug now live in the shared package:
 // the derivation is identical on both sides of the container boundary, and only the guard
 // below (is `worktreesDir` a bind mount?) is container-specific.
-import { deriveWorktreeLayout } from "pi-extension-herdr-core";
+import { deriveWorktreeLayout, expandTilde } from "pi-extension-herdr-core";
 
 /** Everything this module needs from the outside world, injectable for tests. */
 export interface ResolveDeps {
@@ -37,6 +37,8 @@ export interface ResolveDeps {
   isContainer(): boolean;
   /** Whether a path already exists on disk. */
   pathExists(path: string): boolean;
+  /** The container user's home directory, for `expandTilde`. */
+  homedir: string;
 }
 
 export type WorktreePathErrorCode = "NOT_A_REPO" | "NOT_A_MOUNT" | "PATH_EXISTS";
@@ -105,7 +107,12 @@ export function resolveWorktreePath(
   cwd: string,
   deps: ResolveDeps,
 ): WorktreePathResult {
-  const startPath = params.repo ? resolve(cwd, params.repo) : cwd;
+  // `~` is expanded here for the same reason the host-side tools do it: this is a tool
+  // parameter filled in by a model, with no shell in the loop to expand it. Without this,
+  // `repo: ~/project` silently resolves to `<cwd>/~/project` and fails as NOT_A_REPO.
+  const startPath = params.repo
+    ? resolve(cwd, expandTilde(params.repo, deps.homedir))
+    : cwd;
   const repoRoot = deps.gitRevParseTopLevel(startPath);
   if (!repoRoot) {
     return {
