@@ -181,12 +181,14 @@ export default function (pi: ExtensionAPI) {
           info = resolved;
           ctx?.ui.setStatus(
             "devcontainer",
-            `devcontainer: ${
-              resolved.containerId.slice(0, 12)
-            } (${resolved.remoteWorkspaceFolder})`,
+            statusLine(
+              resolved.containerId,
+              resolved.remoteWorkspaceFolder,
+              herdrAvailable,
+            ),
           );
           ctx?.ui.notify(
-            `devcontainer ready. Tools routed into ${resolved.remoteWorkspaceFolder}.`,
+            readyMessage(resolved.remoteWorkspaceFolder, herdrAvailable),
             "info",
           );
           return resolved;
@@ -462,6 +464,35 @@ export default function (pi: ExtensionAPI) {
 
 function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * The persistent status line.
+ *
+ * The `+herdr` marker exists because the Herdr tools register **silently** — a session with
+ * no Herdr binary is supposed to see nothing at all, which is right, but it leaves a session
+ * that *does* have one with no confirmation either. In practice this line was mistaken for
+ * `/devcontainer`'s output, and the question "did the Herdr tools load?" went unanswered by
+ * the surface that was actually being read. Now it answers it.
+ */
+export function statusLine(
+  containerId: string,
+  remoteWorkspaceFolder: string,
+  herdrAvailable: boolean,
+): string {
+  return `devcontainer: ${containerId.slice(0, 12)} (${remoteWorkspaceFolder})` +
+    (herdrAvailable ? " +herdr" : "");
+}
+
+/** The one-off ready notification. Names the Herdr tools when they registered. */
+export function readyMessage(
+  remoteWorkspaceFolder: string,
+  herdrAvailable: boolean,
+): string {
+  const base = `devcontainer ready. Tools routed into ${remoteWorkspaceFolder}.`;
+  return herdrAvailable
+    ? `${base} Herdr orchestration tools active (devcontainer_herdr_*).`
+    : base;
 }
 
 /**

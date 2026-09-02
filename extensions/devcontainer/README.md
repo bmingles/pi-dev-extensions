@@ -140,7 +140,22 @@ design choice:
 
 They **register only when a `herdr` binary resolves** (`HERDR_BIN_PATH` →
 `HERDR_BIN` → a `PATH` walk). An ordinary `pic` session never sees them.
-`/devcontainer` reports whether they are active and, when they are not, why.
+
+Three places say whether they loaded, in increasing detail:
+
+- the **status line** gains a `+herdr` marker —
+  `devcontainer: 1ca7c3d6720d (/workspaces/devc-dev) +herdr`;
+- the **ready notification** at session start names them;
+- **`/devcontainer`** reports whether they are active and, when they are not,
+  why — the only place that gives a reason.
+
+Note the status line and `/devcontainer`'s output are different things and look
+similar; the status line is the one that is always on screen. If you are in a
+Herdr pane and see no `+herdr`, run `/devcontainer` for the reason. The usual
+one is a `herdr` that is a shell function or alias rather than a binary on
+`PATH` — the resolver does an `existsSync` walk and cannot see shell functions,
+and `runHerdr` spawns with `shell: false`, so such a `herdr` would not work at
+call time either. Set `HERDR_BIN_PATH` to the real binary.
 
 ⚠️ These are **not** `extensions/herdr-worktrees`' `herdr_devc_*` tools. Those
 run **inside** the container against a container Herdr; these run on the
