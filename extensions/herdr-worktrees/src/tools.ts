@@ -6,9 +6,13 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { runHerdr } from "./herdr-cli.ts";
-import { errorResult, okResult } from "./tool-result.ts";
-import { createWorktreeArgs, extractWorktree } from "./worktree-create.ts";
+import {
+  createWorktreeArgs,
+  errorResult,
+  extractWorktree,
+  okResult,
+  runHerdr,
+} from "pi-extension-herdr-core";
 import {
   type ResolveDeps,
   resolveWorktreePath,

@@ -1,12 +1,14 @@
 /**
- * Pure path derivation + mount guard for the devcontainer `.worktrees`
- * sibling convention.
+ * The mount guard for the devcontainer `.worktrees` sibling convention.
  *
  * This module owns exactly one job: given a repo root and a branch name,
  * decide *where* a worktree checkout should live under this host's layout
  * (`<parent>/<repo>.worktrees/<slug>`, never Herdr's own
  * `<worktrees.directory>/<repo>/<slug>`), and refuse to answer with a path
- * that Herdr would silently create outside a bind mount.
+ * that Herdr would silently create outside a bind mount. The derivation
+ * itself is `pi-extension-herdr-core`'s `deriveWorktreeLayout` — shared with
+ * the host-side `devcontainer_herdr_*` tools, which apply a different guard
+ * (`NOT_MOUNTED_IN_CONTAINER`) to the same rule.
  *
  * Every dependency that touches the outside world (git, `/proc/mounts`,
  * `/.dockerenv`, the filesystem) is injected so this can be exercised with
@@ -19,7 +21,11 @@
  * `/run/host_mark/Users`, not the host path that was actually mounted).
  */
 
-import { dirname, join, normalize, resolve } from "node:path";
+import { normalize, resolve } from "node:path";
+// The `<repo>.worktrees/<slug>` rule and its branch slug now live in the shared package:
+// the derivation is identical on both sides of the container boundary, and only the guard
+// below (is `worktreesDir` a bind mount?) is container-specific.
+import { deriveWorktreeLayout } from "pi-extension-herdr-core";
 
 /** Everything this module needs from the outside world, injectable for tests. */
 export interface ResolveDeps {
@@ -56,53 +62,6 @@ export interface WorktreePathErr {
 }
 
 export type WorktreePathResult = WorktreePathOk | WorktreePathErr;
-
-/**
- * `slug(branch)`: lowercase, `/` and anything outside `[a-z0-9._-]` replaced
- * with `-`, runs of `-` collapsed, leading/trailing `-` trimmed.
- * `feature/foo_bar` -> `feature-foo_bar`.
- *
- * Deliberately does not try to match Herdr's own branch-slug rule (used only
- * under `worktrees.directory`, the layout this extension never takes).
- */
-export function slugify(branch: string): string {
-  return branch
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-export interface WorktreeLayout {
-  repoName: string;
-  worktreesDir: string;
-  path: string;
-  slug: string;
-}
-
-/**
- * The path rule, stated once:
- *
- *   repoRoot     = git rev-parse --show-toplevel   (from `repo`, or cwd)
- *   repoName     = basename(repoRoot)
- *   worktreesDir = dirname(repoRoot) + "/" + repoName + ".worktrees"
- *   path         = worktreesDir + "/" + slug(branch)
- *
- * Both `worktreesDir` and `path` are returned normalized (no `..` segments) —
- * Herdr's `worktree create` response echoes an unnormalized `--path` back
- * verbatim while `worktree list` returns it normalized, so this module never
- * hands out anything but the normalized form.
- */
-export function deriveWorktreeLayout(
-  repoRoot: string,
-  branch: string,
-): WorktreeLayout {
-  const repoName = repoRoot.split("/").filter(Boolean).pop() ?? repoRoot;
-  const worktreesDir = normalize(join(dirname(repoRoot), `${repoName}.worktrees`));
-  const slug = slugify(branch);
-  const path = normalize(join(worktreesDir, slug));
-  return { repoName, worktreesDir, path, slug };
-}
 
 /**
  * Unescape the octal escapes (`\040` = space, `\011` = tab, `\012` = newline,

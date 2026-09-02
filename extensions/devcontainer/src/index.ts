@@ -17,9 +17,13 @@
  *   cd /path/to/project
  *   pi -e /path/to/pi-extensions/devcontainer
  *
- * Requires Docker and Node — no `devc` binary on PATH.
+ * Requires Docker and Node — no `devc` binary on PATH. That stays true with the Herdr
+ * orchestration tools below: they shell out to `herdr` and build their own `docker exec`
+ * argv, and are registered only when a `herdr` binary resolves.
  */
 
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import type {
   ExtensionAPI,
@@ -40,6 +44,9 @@ import {
   createReadHostTool,
   realHostReadFs,
 } from "pi-extension-host-read-core";
+import { resolveHerdrBin, runHerdr } from "pi-extension-herdr-core";
+import { realFsProbe, resolveWorktree } from "@devc-tools/core";
+import { registerDevcontainerHerdrTools } from "./herdr-tools.ts";
 import {
   type ContainerInfo,
   ensureContainer as containerUp,
@@ -85,6 +92,15 @@ export default function (pi: ExtensionAPI) {
   // Captured once, at extension load, from pi's launch directory — the container
   // is resolved from it exactly as `devc attach` from that directory would.
   const hostCwd = process.cwd();
+
+  // The Herdr orchestration tools register only when a `herdr` binary actually resolves:
+  // `resolveHerdrBin` falls back to the bare name `herdr`, so anything else means
+  // HERDR_BIN_PATH/HERDR_BIN was set or a PATH walk hit. An ordinary `pic` session must not
+  // gain three tools it cannot use — pi-herdr's own 43 are already a large surface to hand
+  // an orchestrator. The check is a synchronous `existsSync` walk, so it happens once here
+  // rather than per call.
+  const herdrBin = resolveHerdrBin();
+  const herdrAvailable = herdrBin !== "herdr";
 
   // Built-in tools instantiated against the host cwd, used only for their name +
   // schema when spreading into the overrides below.
@@ -253,6 +269,12 @@ export default function (pi: ExtensionAPI) {
           `Remote user: ${active.remoteUser}`,
           `Host workspace: ${hostCwd}`,
           `Container workspace: ${active.remoteWorkspaceFolder}`,
+          // The only discoverability these tools have: nothing else says whether they
+          // registered, or why they did not.
+          herdrAvailable
+            ? `Herdr tools: active (herdr at ${herdrBin})`
+            : "Herdr tools: inactive — no herdr binary found " +
+              "(set HERDR_BIN_PATH or HERDR_BIN, or put herdr on PATH)",
         ].join("\n"),
         "info",
       );
@@ -365,6 +387,34 @@ export default function (pi: ExtensionAPI) {
   // exception: unprompted directory listing, scoped to the same docs root.
   pi.registerTool(createListHostDocsTool(hostCwd, hostReadDeps));
 
+  // The host-side Herdr orchestration tools (topology 1b — see
+  // `devc-dev/docs/herdr-host-orchestrator.md`). Purely additive: they override no built-in
+  // and stay outside the ROUTING_MARKER_KEY mechanism above, which is only about overriding
+  // the same seven built-ins. They live here rather than in a fourth extension because
+  // container identity must have exactly one owner — `ensureContainer` resolves and caches
+  // one ContainerInfo (and one home-directory confirmation) per pi process, and a separate
+  // package would resolve the container a second time and could legitimately pick a
+  // different one.
+  if (herdrAvailable) {
+    registerDevcontainerHerdrTools(pi, {
+      hostCwd,
+      async ensureContainer(ctx) {
+        try {
+          return { ok: true, info: await ensureContainer(ctx) };
+        } catch (err) {
+          return { ok: false, message: describeError(err) };
+        }
+      },
+      getMounts: containerGetMounts,
+      gitRevParseTopLevel,
+      pathExists: (p) => existsSync(p),
+      runHerdr,
+      resolveWorktree: (hostPath) => resolveWorktree(hostPath, null, realFsProbe),
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+      now: () => Date.now(),
+    });
+  }
+
   // `user_bash` fires for both `!` and `!!`. `!` is routed into the container
   // like the LLM's own `bash` tool — the two should behave identically. `!!`
   // (excludeFromContext, pi's own "don't show the model this" prefix) is the
@@ -411,4 +461,21 @@ export default function (pi: ExtensionAPI) {
 
 function describeError(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * `git rev-parse --show-toplevel` on the HOST — this extension runs there, and so does the
+ * git that owns the worktrees the Herdr tools create. Undefined when `cwd` is not in a repo.
+ */
+function gitRevParseTopLevel(cwd: string): string | undefined {
+  try {
+    const out = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.trim() || undefined;
+  } catch {
+    return undefined;
+  }
 }

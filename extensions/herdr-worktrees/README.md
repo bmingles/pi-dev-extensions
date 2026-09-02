@@ -20,6 +20,32 @@ dependency would only couple this package to a third-party release cadence
 for no gain. Load both together (`pi -e ... -e ...`); the `herdr_` vs.
 `herdr_devc_` name prefixes keep their tools distinguishable in a tool list.
 
+## ⚠️ `herdr_devc_*` (here) vs. `devcontainer_herdr_*` (in `extensions/devcontainer`)
+
+Two mirror-image tool families now exist in this repo, and they serve
+**opposite topologies**:
+
+| | `herdr_devc_*` (this extension) | `devcontainer_herdr_*` ([`extensions/devcontainer`](../devcontainer)) |
+| --- | --- | --- |
+| pi runs | **inside** the container | on the **host** |
+| Herdr runs | inside the container | on the **host** |
+| The guard asks | is `<repo>.worktrees` itself a mountpoint, per `/proc/mounts`? | is the derived **host** path covered by a bind mount of the target container, per `docker inspect`? |
+| Failure code | `NOT_A_MOUNT` | `NOT_MOUNTED_IN_CONTAINER` |
+| Paths | container paths only — a container cannot derive a host path at all | both, always named `hostPath` / `containerPath` |
+
+The two can never load in one process, but the codes and prefixes are
+deliberately distinct strings so that a reader grepping for one does not find
+the other.
+
+## Shared plumbing lives in `extensions/herdr-core`
+
+The pieces both families need — `resolveHerdrBin`, `runHerdr`, the
+`okResult`/`errorResult` helpers, `createWorktreeArgs`/`extractWorktree`, and
+the `<repo>.worktrees/<slug>` derivation (`slugify`, `deriveWorktreeLayout`) —
+live in [`pi-extension-herdr-core`](../herdr-core), a private library package
+with no `pi.extensions` key. Only the **guard** differs between the two
+topologies, so only the guard stayed here, in `src/worktree-path.ts`.
+
 ## Why this is NOT in the `devcontainer`/`sbx`/`gondolin` mutual-exclusion group
 
 Those three extensions run pi **on the host** and override pi's built-in
@@ -144,10 +170,11 @@ npm test           # node --test — offline, no Herdr server, no pi
 Tests run entirely against fixtures (an injected `/proc/mounts` fixture, a
 fake `git rev-parse`, a fake `existsSync`) — no server, no pi, no real
 container. `src/worktree-path.ts` is deliberately its own module, separate
-from the tool handlers in `src/tools.ts`, so the derivation and mount-check
-logic stay testable exactly that way. `src/real-deps.ts` is the only place
+from the tool handlers in `src/tools.ts`, so the mount-check logic stays
+testable exactly that way. `src/real-deps.ts` is the only place
 in this package that touches git, `/proc/mounts`, `/.dockerenv`, or the real
-filesystem.
+filesystem. The path derivation and the Herdr CLI plumbing moved to
+[`herdr-core`](../herdr-core), and their tests moved with them.
 
 A real end-to-end check (verified manually while building this extension,
 against Herdr 0.8.2) also exists but isn't part of `npm test`, since it

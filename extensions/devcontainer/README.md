@@ -129,6 +129,71 @@ poison-then-teardown** case — a bind source's bytes
 persisting on the host after its container is removed — is knowingly out of
 scope for v1; a persisted taint set would be the durable fix (future phase).
 
+## `devcontainer_herdr_*` — orchestrating container agents from a host Herdr
+
+Three tools for the topology where **pi runs on the host, Herdr runs on the
+host, and the agents run inside the container** — the orchestrator creates
+worktrees at host paths and fans agents out into the container that this
+extension already routes into. Background and the measurements behind each
+design choice:
+[`devc-dev/docs/herdr-host-orchestrator.md`](https://github.com/bmingles/devc-dev/blob/main/docs/herdr-host-orchestrator.md).
+
+They **register only when a `herdr` binary resolves** (`HERDR_BIN_PATH` →
+`HERDR_BIN` → a `PATH` walk). An ordinary `pic` session never sees them.
+`/devcontainer` reports whether they are active and, when they are not, why.
+
+⚠️ These are **not** `extensions/herdr-worktrees`' `herdr_devc_*` tools. Those
+run **inside** the container against a container Herdr; these run on the
+**host** against a host Herdr. The two can never load in one process, but do
+not confuse them in docs or a grep.
+
+| Tool | Does |
+| --- | --- |
+| `devcontainer_herdr_worktree_path` | Derives the host path for a branch under the `<repo>.worktrees/<slug>` sibling convention, and the container path for it. Creates nothing, never calls `herdr`. |
+| `devcontainer_herdr_worktree_create` | The same resolution, then `herdr worktree create`, then asserts the new checkout's `.git` link is relative. |
+| `devcontainer_herdr_start_agent` | Splits a Herdr pane and launches an agent inside the container in it. Returns a `paneId`. |
+
+### Two path vocabularies
+
+An orchestrator that loads this extension holds both at once: its own routed
+`read`/`bash` speak **container** paths, while Herdr's worktree and workspace
+surfaces speak **host** paths. Every tool here therefore returns both,
+explicitly named — `hostPath` and `containerPath`, never a bare `path`.
+
+The container's mount table (`docker inspect`, read host-side through core's
+`getContainerMounts`) is what relates them, and it is simultaneously the safety
+guard: a host path that no bind mount covers is exactly a path the container
+cannot see. That failure is `NOT_MOUNTED_IN_CONTAINER`, and the fix is a
+`<repo>.worktrees` sibling mount in `.devc/devc.jsonc` (via `devc config`) plus
+a rebuild — not a retry.
+
+`ABSOLUTE_GITDIR` is the same class of failure: Herdr reported success, but the
+checkout's `gitdir:` link names a host path that does not resolve inside the
+container. Fix it with `worktree.useRelativePaths=true` on the **host** git
+(git ≥ 2.48), then remove and recreate the worktree.
+
+### After the start
+
+`devcontainer_herdr_start_agent` deliberately stops at "the agent is running in
+this pane". Everything after that is pane-scoped and topology-agnostic, and
+`pi-herdr` already does it well — drive the returned `paneId` with its
+`herdr_send_prompt` / `herdr_wait_agent` / `herdr_read_agent`.
+
+Three caveats come with the launch, all inherited from asserting identity with
+`HERDR_AGENT` rather than letting Herdr detect it:
+
+- **Trust `working` and `blocked`; distrust `idle`.** The positive states come
+  from Herdr's own screen manifests, evaluated against terminal output, which
+  crosses the container boundary unchanged. `idle` is a fallback that covers
+  "at its prompt", "not started yet", "failed to launch" and "stuck on an auth
+  prompt" alike.
+- **Identity rides the wrapper, not the agent.** Through `docker exec` it
+  exists before the agent starts and survives whatever happens to it. You are
+  watching the lifetime of the container command.
+- **`shift+tab` does not survive `docker exec -it`.** It will not cycle Claude
+  Code's permission mode — pass an explicit `--permission-mode` in `agentArgs`
+  instead. Plain keys and `herdr agent prompt` work normally.
+
 ## Home-directory start confirmation
 
 The devcontainer's workspace mount binds `hostCwd` (where pi was launched)
@@ -185,6 +250,12 @@ folders.
   flag some code needs is never required. (The repo-root `.nvmrc` pins a
   newer version for local dev — that's not a floor.)
 
+**The Herdr orchestration tools below add nothing to this list.** They shell
+out to a `herdr` binary if one is present and build their own `docker exec`
+argv; they need no `devc` on `PATH`, and without Herdr they simply do not
+register. That promise is deliberate — a reader who assumes otherwise will add
+a dependency that is not needed.
+
 ## Development
 
 Part of the repo-root npm workspace (see the root README's
@@ -198,9 +269,12 @@ npm run typecheck  # tsc --noEmit against pi's real types
 npm test           # node --test (unit tests, injected spawn — no docker)
 ```
 
-`@devc-tools/core` is a normal npm dependency of this package, pinned to an
-exact version: it is pre-1.0, and the pieces consumed here (`buildExecArgs`,
-`startContainer`'s `StartOptions`) are not a stability promise yet.
+`@devc-tools/core` is a normal npm dependency of this package, on a caret
+range with a floor at the lowest version that carries everything used here
+(currently `^0.1.3`, for `mount_paths.ts`). It is pre-1.0, so the pieces
+consumed (`buildExecArgs`, `startContainer`'s `StartOptions`,
+`hostToContainerPath`) are not a stability promise yet — raise the floor when a
+new one is needed, and the committed lockfile pins the exact resolution.
 
 The unit tests inject a fake spawn for `docker exec` and a fake
 `startContainer` / devcontainer runner for the lifecycle, so they need neither

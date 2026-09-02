@@ -1,13 +1,15 @@
 # pi-dev-extensions
 
-A [pi](https://github.com/earendil-works) coding-agent package bundling six
-Node/TypeScript extensions for routing pi's tools through an isolated dev
+A [pi](https://github.com/earendil-works) coding-agent package bundling seven
+Node/TypeScript packages for routing pi's tools through an isolated dev
 environment, keeping the host machine awake while pi works unattended, and
-(for a pi running inside a devcontainer) creating Herdr worktrees under this
-host's layout:
+creating Herdr worktrees — and launching Herdr agents — under this host's
+layout, from either side of the container boundary:
 
 - **[`extensions/devcontainer`](#extensionsdevcontainer)** — routes pi's
-  built-in tools into a devcontainer via `devc`
+  built-in tools into a devcontainer via `devc`; also, when a `herdr` binary
+  is present, three host-side tools for creating container-visible worktrees
+  and launching container agents into Herdr panes
 - **[`extensions/sbx`](#extensionssbx)** — routes pi's built-in tools into a
   Docker Sandboxes (`sbx`) sandbox instead of a devcontainer
 - **[`extensions/gondolin`](#extensionsgondolin)** — routes pi's built-in
@@ -18,6 +20,9 @@ host's layout:
   running **inside** a devcontainer alongside `pi-herdr`: derives a safe
   `herdr worktree create --path` under the `<repo>.worktrees/<branch>`
   sibling convention and guards against one that isn't bind-mounted
+- **[`extensions/herdr-core`](#extensionsherdr-core)** — a shared library (not
+  independently `pi -e`-loadable) providing the `herdr` CLI plumbing and the
+  `<repo>.worktrees/<slug>` derivation shared by both Herdr tool families
 - **[`extensions/host-read-core`](#extensionshost-read-core)** — a shared
   library (not independently `pi -e`-loadable) providing the
   `read_host`/`list_host_docs` tool machinery consumed by `devcontainer`,
@@ -25,7 +30,7 @@ host's layout:
 
 ## Requirements
 
-- Node.js ≥ 22.19.0 — four of the five packages use native `.ts`
+- Node.js ≥ 22.19.0 — six of the seven packages use native `.ts`
   type-stripping (no build step), which needs Node's default-on stripping
   support (22.18.0+); the extra `--experimental-transform-types` flag some
   non-erasable TS syntax needs is never required here since none of the
@@ -69,7 +74,7 @@ The repo root's `package.json` does double duty:
   (`host-read-core` is never listed — it's a library, not `-e`-loadable).
   This is what `pi install`/`pi -e` look for.
 - It's also the real npm workspaces root (`"workspaces": ["extensions/*"]`)
-  — one `npm install` from repo root hoists and links all five packages
+  — one `npm install` from repo root hoists and links all seven packages
   correctly regardless of order. This is also exactly what `pi install
 git:...`'s own automatic `npm install` step runs, so installing straight
   from GitHub needs no extra manual step.
@@ -83,7 +88,7 @@ artifacts.
 
 Per pi's `docs/packages.md`, `pi install git:host/user/repo@ref` (or
 `pi -e git:...` to try it without persisting) clones the whole repository,
-runs `npm install` at its root (setting up all five packages via the
+runs `npm install` at its root (setting up all seven packages via the
 workspaces root above), and loads whichever paths its `pi.extensions`
 manifest lists — **all four by default**. `devcontainer`, `sbx`, and
 `gondolin` are mutually exclusive (see below), so pick one at install time
@@ -137,7 +142,15 @@ pi -e /path/to/pi-dev-extensions/extensions/devcontainer
 ```
 
 Its only runtime dependency is Docker — the container lifecycle is driven
-in-process through `@devc-tools/core`, with no `devc` binary involved. See
+in-process through `@devc-tools/core`, with no `devc` binary involved.
+
+It also carries the **`devcontainer_herdr_*` orchestration tools**: with a
+`herdr` binary on the machine, a host-side pi can derive a worktree path the
+container can actually see, create it, and launch an agent inside the
+container into a new Herdr pane. They register only when Herdr resolves, they
+override nothing, and they add no requirement beyond Docker and Node. Note
+they are the **host**-side mirror of `extensions/herdr-worktrees`'
+container-side `herdr_devc_*` tools, not the same thing. See
 [`extensions/devcontainer/README.md`](extensions/devcontainer/README.md) for
 details and `npm run typecheck` / `npm test`.
 
@@ -274,6 +287,25 @@ create-and-delegate example) lives in `devc-dev`'s
 
 ---
 
+## `extensions/herdr-core`
+
+A **shared library**, not a pi extension — it has no `pi.extensions` field and
+is never loaded directly via `pi -e`. It holds what both Herdr tool families
+need: `herdr` binary resolution, the `runHerdr` JSON-envelope wrapper, the
+`okResult`/`errorResult` tool-result helpers, the `herdr worktree create` argv
+builder and response normalizer, and the `<repo>.worktrees/<slug>` path
+derivation. Consumed via an npm `file:` dependency
+(`"pi-extension-herdr-core": "file:../herdr-core"`) by
+`extensions/herdr-worktrees` (container-side) and `extensions/devcontainer`
+(host-side).
+
+The derivation is shared precisely because it is identical on both sides of
+the container boundary; the **guards** are not, and they stay in the two
+consumers. Like the rest of this repo's Herdr code it deliberately does not
+depend on `pi-herdr` — both wrap the same CLI, not each other.
+
+---
+
 ## `extensions/host-read-core`
 
 A **shared library**, not a pi extension — it has no `pi.extensions` field
@@ -294,7 +326,7 @@ typecheck` / `npm test`.
 ## Development
 
 ```bash
-npm install         # installs and links all five packages
+npm install         # installs and links all seven packages
 npm run typecheck --workspace=extensions/<name>
 npm test --workspace=extensions/<name>
 ```
