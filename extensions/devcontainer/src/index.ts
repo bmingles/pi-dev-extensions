@@ -408,6 +408,7 @@ export default function (pi: ExtensionAPI) {
       getMounts: containerGetMounts,
       gitRevParseTopLevel,
       pathExists: (p) => existsSync(p),
+      homedir: homedir(),
       runHerdr,
       resolveWorktree: (hostPath) => resolveWorktree(hostPath, null, realFsProbe),
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),

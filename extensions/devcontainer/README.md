@@ -160,6 +160,13 @@ An orchestrator that loads this extension holds both at once: its own routed
 surfaces speak **host** paths. Every tool here therefore returns both,
 explicitly named — `hostPath` and `containerPath`, never a bare `path`.
 
+Host-path *inputs* (`repo`, `hostPath`) accept a leading `~`, which is expanded
+against the host's home directory. These tools are called by a model rather
+than a shell, so nothing upstream would otherwise expand it and `~/code/x`
+would silently resolve to `<cwd>/~/code/x`. (`~user/...` is not expanded —
+that needs a passwd lookup.) Note `devc`'s own `--cwd` deliberately does *not*
+do this: there a shell owns the expansion.
+
 The container's mount table (`docker inspect`, read host-side through core's
 `getContainerMounts`) is what relates them, and it is simultaneously the safety
 guard: a host path that no bind mount covers is exactly a path the container

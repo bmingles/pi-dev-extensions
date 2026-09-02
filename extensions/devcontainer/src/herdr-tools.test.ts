@@ -49,6 +49,7 @@ function harness(
     getMounts: async () => MOUNTS,
     gitRevParseTopLevel: () => "/Users/me/code/tools/repo",
     pathExists: () => false,
+    homedir: "/Users/me",
     runHerdr: async <T>(args: string[]) => {
       calls.push(args);
       const scripted = herdr?.(args) ??
@@ -415,4 +416,21 @@ test("start_agent honours the launcher seam", async () => {
     h.calls.find((c) => c[1] === "run")![3],
     "devc-launcher /workspaces/tools/repo",
   );
+});
+
+test("start_agent expands a ~ hostPath instead of refusing it", () => {
+  // Without expansion this joins onto nothing sensible, misses every mount, and comes back
+  // as NOT_MOUNTED_IN_CONTAINER — the same shape of failure a `~` repo produced on a real
+  // host run. There is no shell in the loop to expand it.
+  const h = startHarness();
+  return run(h, "devcontainer_herdr_start_agent", {
+    hostPath: "~/code/tools/repo.worktrees/feat",
+  }).then((r) => {
+    assert.equal(r.isError, undefined, JSON.stringify(r.details));
+    assert.equal(r.details.hostPath, "/Users/me/code/tools/repo.worktrees/feat");
+    assert.equal(
+      r.details.containerPath,
+      "/workspaces/tools/repo.worktrees/feat",
+    );
+  });
 });

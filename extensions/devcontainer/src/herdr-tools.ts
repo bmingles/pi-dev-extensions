@@ -43,6 +43,7 @@ import {
   paneSplitArgs,
 } from "./herdr-launch.ts";
 import {
+  expandTilde,
   type HerdrPathDeps,
   type HerdrPathErrorCode,
   resolveHerdrWorktreePath,
@@ -466,7 +467,11 @@ export function registerStartAgentTool(
         const a = await anchor(deps, ctx);
         if (!a.ok) return fail<StartDetails & ErrorDetails>(a.code, a.message);
 
-        const hostPath = params.hostPath ?? deps.hostCwd;
+        // Same reason as `repo` in herdr-paths.ts: a model writes `~/...` and no shell
+        // is in the loop to expand it.
+        const hostPath = params.hostPath
+          ? expandTilde(params.hostPath, deps.homedir)
+          : deps.hostCwd;
         const containerPath = hostToContainerPath(hostPath, a.mounts);
         if (containerPath === null) {
           return fail<StartDetails & ErrorDetails>(
