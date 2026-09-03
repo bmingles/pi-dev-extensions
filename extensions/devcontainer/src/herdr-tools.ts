@@ -40,6 +40,7 @@ import {
   type AgentCommandLineOpts,
   buildAgentCommandLine,
   commandForAgentKind,
+  extractFirstPaneId,
   extractPaneId,
   paneSplitArgs,
 } from "./herdr-launch.ts";
@@ -281,8 +282,10 @@ export function registerWorktreeCreateTool(
         "NOT_MOUNTED_IN_CONTAINER / PATH_EXISTS errors — nothing is created when a guard " +
         "fires) and additionally verifies the new checkout's .git link is RELATIVE, since " +
         "an absolute one names a host path that does not resolve inside the container. " +
-        "Defaults to --no-focus. Launch an agent into the returned `hostPath` next with " +
-        "devcontainer_herdr_start_agent.",
+        "Defaults to --no-focus. Launch an agent next with devcontainer_herdr_start_agent, " +
+        "passing this result's `hostPath` and `openWorkspaceId` (as `workspaceId`) so the " +
+        "agent runs in the pane just opened here instead of an idle one plus a second, " +
+        "unrelated pane.",
       promptSnippet:
         "Create a Git worktree the devcontainer can see, and open it as a Herdr workspace",
       promptGuidelines: [
@@ -291,6 +294,9 @@ export function registerWorktreeCreateTool(
           "derives --path and guards against a target the container cannot see.",
         "ABSOLUTE_GITDIR is not retryable: remove the created worktree, set " +
           "worktree.useRelativePaths=true on the HOST git (git >= 2.48), and create it again.",
+        "Chain straight into devcontainer_herdr_start_agent with hostPath and " +
+          "openWorkspaceId (as workspaceId) — that is the first-class create-then-attach " +
+          "path and leaves no idle pane behind.",
       ],
       parameters: createParams,
       async execute(_id, params, signal, _onUpdate, ctx) {
@@ -405,17 +411,37 @@ const startParams = Type.Object({
   hostPath: Type.Optional(
     Type.String({
       description:
-        "HOST directory for the pane AND (translated) the agent's cwd (default: pi's host " +
-        "cwd). Pass what devcontainer_herdr_worktree_create returned.",
+        "HOST directory for the agent's cwd, translated to the container path (default: " +
+        "pi's host cwd). Pass what devcontainer_herdr_worktree_create returned. Still used " +
+        "for the container-path translation even when `workspaceId` is also passed.",
+    }),
+  ),
+  workspaceId: Type.Optional(
+    Type.String({
+      description:
+        "Run in the pane already open in this Herdr workspace instead of splitting a new " +
+        "one off pi's own pane — pass the `openWorkspaceId` devcontainer_herdr_worktree_create " +
+        "returned. This is the low-ceremony create-then-attach path: it lands the agent in " +
+        "the pane `worktree_create` already opened (which would otherwise sit idle) rather " +
+        "than leaving that pane idle and splitting a second, unrelated one, and it ties the " +
+        "agent's pane to Herdr's own worktree<->workspace lifecycle, so removing the " +
+        "worktree (herdr_worktree_remove) closes this pane too instead of orphaning it. " +
+        "`split`/`focus` are ignored when this is passed.",
     }),
   ),
   split: Type.Optional(
     Type.Union([Type.Literal("right"), Type.Literal("down")], {
-      description: "Split direction for the new pane (default: 'right').",
+      description:
+        "Split direction for the new pane (default: 'right'). Ignored when `workspaceId` " +
+        "is passed.",
     }),
   ),
   focus: Type.Optional(
-    Type.Boolean({ description: "Focus the new pane (default false — background work)." }),
+    Type.Boolean({
+      description:
+        "Focus the new pane (default false — background work). Ignored when `workspaceId` " +
+        "is passed.",
+    }),
   ),
   env: Type.Optional(
     Type.Record(Type.String(), Type.String(), {
@@ -426,6 +452,7 @@ const startParams = Type.Object({
 
 type StartOkDetails = {
   paneId: string;
+  reusedWorkspaceId: string | undefined;
   name: string;
   agent: string;
   hostPath: string;
@@ -445,18 +472,25 @@ export function registerStartAgentTool(
       name: "devcontainer_herdr_start_agent",
       label: "Start a container agent in a Herdr pane",
       description:
-        "Split a new Herdr pane on the HOST and launch an agent INSIDE the routed " +
-        "devcontainer in it, with its cwd set to the container path for `hostPath`. " +
-        "Identity is asserted with HERDR_AGENT rather than detected, so Herdr's " +
-        "working/blocked states remain trustworthy but 'idle' is a fallback that also " +
-        "covers 'not started yet' and 'stuck on an auth prompt'. Returns a paneId — drive " +
-        "it afterwards with pi-herdr's herdr_send_prompt / herdr_wait_agent / " +
-        "herdr_read_agent.",
+        "Launch an agent INSIDE the routed devcontainer, with its cwd set to the container " +
+        "path for `hostPath`. When `workspaceId` is passed (the `openWorkspaceId` " +
+        "devcontainer_herdr_worktree_create returned), runs in the pane that workspace " +
+        "already has rather than splitting a new one off pi's own pane — the first-class " +
+        "create-then-attach path, with cleanup tied to Herdr's worktree removal. Without " +
+        "it, splits a new pane on the HOST instead. Identity is asserted with HERDR_AGENT " +
+        "rather than detected, so Herdr's working/blocked states remain trustworthy but " +
+        "'idle' is a fallback that also covers 'not started yet' and 'stuck on an auth " +
+        "prompt'. Returns a paneId — drive it afterwards with pi-herdr's " +
+        "herdr_send_prompt / herdr_wait_agent / herdr_read_agent.",
       promptSnippet:
-        "Launch an agent inside the devcontainer in a new Herdr pane",
+        "Launch an agent inside the devcontainer in a Herdr pane",
       promptGuidelines: [
         "Pass the hostPath returned by devcontainer_herdr_worktree_create; the container " +
           "cwd is derived from it, so there is no host/container pair to keep in sync.",
+        "Also pass its openWorkspaceId as workspaceId to land the agent in the pane " +
+          "worktree_create already opened, instead of leaving that pane idle and splitting " +
+          "a second, unrelated one — this is the low-ceremony create-then-attach path, and " +
+          "it makes herdr_worktree_remove clean up the agent's pane too.",
         "After a successful start, drive the pane with pi-herdr's herdr_send_prompt, " +
           "herdr_wait_agent and herdr_read_agent using the returned paneId.",
         "Trust `working` and `blocked`; treat `idle` as unknown. If the agent never " +
@@ -485,26 +519,50 @@ export function registerStartAgentTool(
         const agent = params.agent ?? "claude";
         const name = params.name ?? `agent-${Date.now()}`;
 
-        // `--cwd` on the split is the HOST path: it sets the pane's own shell cwd, which is
-        // what Herdr's Space and branch display key off. The container path goes to the
-        // `docker exec` below instead.
-        const split = await deps.runHerdr<unknown>(
-          paneSplitArgs({
-            direction: params.split ?? "right",
-            hostPath,
-            focus: params.focus ?? false,
-          }),
-          { signal },
-        );
-        if (!split.ok) {
-          return fail<StartDetails & ErrorDetails>("HERDR_FAILED", split.message);
-        }
-        const paneId = extractPaneId(split.data);
-        if (!paneId) {
-          return fail<StartDetails & ErrorDetails>(
-            "PANE_GONE",
-            "herdr pane split reported success but returned no pane id.",
+        let paneId: string | undefined;
+        if (params.workspaceId) {
+          // Retarget into the pane `worktree_create` already opened, instead of splitting a
+          // second one off pi's own pane. That pane's cwd is already the worktree's host
+          // path — Herdr set it when the workspace opened — so there is no `--cwd` to pass
+          // here, and this pane's lifecycle is Herdr's own worktree<->workspace tie, not
+          // ours: `herdr_worktree_remove` closes it along with the workspace.
+          const list = await deps.runHerdr<unknown>(
+            ["pane", "list", "--workspace", params.workspaceId],
+            { signal },
           );
+          if (!list.ok) {
+            return fail<StartDetails & ErrorDetails>("HERDR_FAILED", list.message);
+          }
+          paneId = extractFirstPaneId(list.data);
+          if (!paneId) {
+            return fail<StartDetails & ErrorDetails>(
+              "PANE_GONE",
+              `Workspace ${params.workspaceId} has no pane to run in. Pass hostPath ` +
+                "without workspaceId to split a new pane instead, or check the workspace id.",
+            );
+          }
+        } else {
+          // `--cwd` on the split is the HOST path: it sets the pane's own shell cwd, which
+          // is what Herdr's Space and branch display key off. The container path goes to
+          // the `docker exec` below instead.
+          const split = await deps.runHerdr<unknown>(
+            paneSplitArgs({
+              direction: params.split ?? "right",
+              hostPath,
+              focus: params.focus ?? false,
+            }),
+            { signal },
+          );
+          if (!split.ok) {
+            return fail<StartDetails & ErrorDetails>("HERDR_FAILED", split.message);
+          }
+          paneId = extractPaneId(split.data);
+          if (!paneId) {
+            return fail<StartDetails & ErrorDetails>(
+              "PANE_GONE",
+              "herdr pane split reported success but returned no pane id.",
+            );
+          }
         }
 
         const commandLine = buildCommandLine({
@@ -516,8 +574,11 @@ export function registerStartAgentTool(
           agentArgs: params.agentArgs,
           env: params.env,
         });
+        // No `--json`: verified live (0.8.2) that `pane run` rejects it as an unrecognized
+        // option (`unknown option: --json`) while its response is JSON either way — see the
+        // comment on `paneSplitArgs` in herdr-launch.ts.
         const run = await deps.runHerdr<unknown>(
-          ["pane", "run", paneId, commandLine, "--json"],
+          ["pane", "run", paneId, commandLine],
           { signal },
         );
         if (!run.ok) {
@@ -530,8 +591,13 @@ export function registerStartAgentTool(
         const deadline = deps.now() + AGENT_DETECT_BUDGET_MS;
         let detected = false;
         for (;;) {
+          // No `--json`: verified live (0.8.2) that `agent get` rejects it (a usage error,
+          // exit 2) while its response is JSON either way. This is the more consequential of
+          // the two fixed here — the old flag broke this poll on *every* call, and because
+          // only `got.ok` is checked, it silently manufactured AGENT_NOT_DETECTED after the
+          // full budget on every successful launch, never surfacing the real cause.
           const got = await deps.runHerdr<unknown>(
-            ["agent", "get", paneId, "--json"],
+            ["agent", "get", paneId],
             { signal },
           );
           if (got.ok) {
@@ -552,19 +618,25 @@ export function registerStartAgentTool(
         }
 
         // Best-effort, exactly as pi-herdr's Windows path treats it: a pane that works under
-        // a generated name is better than a failed tool call.
+        // a generated name is better than a failed tool call. No `--json`: `agent rename`
+        // rejects it the same way `agent get` does, and this call ignoring its own result
+        // already means that failure was silent — worth knowing, not worth surfacing.
         await deps.runHerdr<unknown>(
-          ["agent", "rename", paneId, name, "--json"],
+          ["agent", "rename", paneId, name],
           { signal },
         );
 
         return okResult(
-          `Started '${agent}' in pane ${paneId}, running in the container at ` +
-            `${containerPath} (host ${hostPath}). Drive it with pi-herdr's ` +
-            `herdr_send_prompt / herdr_wait_agent / herdr_read_agent using paneId ` +
-            `'${paneId}'. Trust 'working' and 'blocked'; 'idle' is a fallback that also ` +
-            "covers 'not started yet'.",
+          `Started '${agent}' in pane ${paneId}` +
+            (params.workspaceId
+              ? ` (reused from workspace ${params.workspaceId})`
+              : "") +
+            `, running in the container at ${containerPath} (host ${hostPath}). Drive it ` +
+            "with pi-herdr's herdr_send_prompt / herdr_wait_agent / herdr_read_agent using " +
+            `paneId '${paneId}'. Trust 'working' and 'blocked'; 'idle' is a fallback that ` +
+            "also covers 'not started yet'.",
           {
+            reusedWorkspaceId: params.workspaceId,
             paneId,
             name,
             agent,

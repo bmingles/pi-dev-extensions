@@ -4,6 +4,7 @@ import { test } from "node:test";
 import {
   buildAgentCommandLine,
   commandForAgentKind,
+  extractFirstPaneId,
   extractPaneId,
   paneSplitArgs,
   shellQuote,
@@ -165,7 +166,10 @@ test("buildAgentCommandLine uses the container path, never a host one", () => {
 
 // ---- paneSplitArgs ----------------------------------------------------------
 
-test("paneSplitArgs passes the HOST path as --cwd and defaults to no-focus", () => {
+test("paneSplitArgs passes the HOST path as --cwd, defaults to no-focus, and drops --json", () => {
+  // No --json: verified live (0.8.2) that a sibling call in this same launch flow
+  // (`pane run`) rejects it as an unrecognized option, while every response here is JSON
+  // with or without it — see the comment on `paneSplitArgs`.
   assert.deepEqual(
     paneSplitArgs({ direction: "right", hostPath: "/Users/me/code/x", focus: false }),
     [
@@ -177,7 +181,6 @@ test("paneSplitArgs passes the HOST path as --cwd and defaults to no-focus", () 
       "--cwd",
       "/Users/me/code/x",
       "--no-focus",
-      "--json",
     ],
   );
 });
@@ -211,4 +214,27 @@ test("extractPaneId returns undefined for junk", () => {
   assert.equal(extractPaneId({ pane: {} }), undefined);
   assert.equal(extractPaneId({ pane_id: "" }), undefined);
   assert.equal(extractPaneId({ pane_id: 3 }), undefined);
+});
+
+// ---- extractFirstPaneId ------------------------------------------------------
+
+test("extractFirstPaneId reads the first entry of a `panes` array", () => {
+  assert.equal(
+    extractFirstPaneId({ panes: [{ pane_id: "%1" }, { pane_id: "%2" }] }),
+    "%1",
+  );
+  assert.equal(extractFirstPaneId({ panes: [{ paneId: "%3" }] }), "%3");
+  assert.equal(extractFirstPaneId({ panes: [{ id: "%4" }] }), "%4");
+});
+
+test("extractFirstPaneId reads a bare array response", () => {
+  assert.equal(extractFirstPaneId([{ id: "%5" }]), "%5");
+});
+
+test("extractFirstPaneId returns undefined for junk or an empty list", () => {
+  assert.equal(extractFirstPaneId(null), undefined);
+  assert.equal(extractFirstPaneId({}), undefined);
+  assert.equal(extractFirstPaneId({ panes: [] }), undefined);
+  assert.equal(extractFirstPaneId({ panes: [{}] }), undefined);
+  assert.equal(extractFirstPaneId([]), undefined);
 });

@@ -155,7 +155,7 @@ test("worktree_create passes host paths for both --cwd and --path", async () => 
   );
   assert.equal(args[args.indexOf("--base") + 1], "main");
   assert.ok(args.includes("--no-focus"), "background work must not steal focus");
-  assert.ok(args.includes("--json"));
+  assert.ok(args.includes("--json"), "`worktree create` accepts and ignores --json");
 });
 
 test("worktree_create returns its own label and path, not Herdr's echo", async () => {
@@ -250,8 +250,11 @@ test("start_agent splits on the host path and execs on the container path", asyn
     "the pane's own shell cwd is the HOST path",
   );
   assert.ok(split.includes("--no-focus"));
+  assert.ok(!split.includes("--json"), "pane split drops --json");
 
-  const line = h.calls.find((c) => c[1] === "run")![3];
+  const runCall = h.calls.find((c) => c[1] === "run")!;
+  assert.ok(!runCall.includes("--json"), "pane run rejects --json on 0.8.2");
+  const line = runCall[3];
   assert.ok(line.startsWith("HERDR_AGENT='claude' docker exec -it"), line);
   assert.ok(
     line.includes("-w '/workspaces/tools/repo.worktrees/feat'"),
@@ -330,7 +333,22 @@ test("start_agent renames the pane after detection, best-effort", async () => {
     "agent rename",
   ]);
   const rename = h.calls.at(-1)!;
-  assert.deepEqual(rename.slice(0, 4), ["agent", "rename", "%7", "worker-1"]);
+  assert.deepEqual(rename, ["agent", "rename", "%7", "worker-1"]);
+
+  const get = h.calls.find((c) => c[0] === "agent" && c[1] === "get")!;
+  assert.deepEqual(get, ["agent", "get", "%7"]);
+});
+
+test("start_agent drops --json from agent get and agent rename", () => {
+  // `agent get` and `agent rename` reject --json outright on 0.8.2 (a usage error) — unlike
+  // `pane split`/`pane run`, whose JSON response doesn't depend on the flag either way. The
+  // `agent get` case is the more consequential of the two: it's polled in a loop that only
+  // checks `.ok`, so the flag being wrong there silently turned every successful launch into
+  // AGENT_NOT_DETECTED after the full 20s budget, never surfacing the real cause.
+  const h = startHarness();
+  return run(h, "devcontainer_herdr_start_agent", {}).then(() => {
+    for (const c of h.calls) assert.ok(!c.includes("--json"), c.join(" "));
+  });
 });
 
 test("start_agent succeeds even when the rename fails", async () => {
@@ -433,4 +451,79 @@ test("start_agent expands a ~ hostPath instead of refusing it", () => {
       "/workspaces/tools/repo.worktrees/feat",
     );
   });
+});
+
+// ---- devcontainer_herdr_start_agent — workspaceId retarget ------------------
+// The first-class create-then-attach path: land the agent in the pane
+// devcontainer_herdr_worktree_create already opened, instead of splitting a second one off
+// pi's own pane and leaving the first idle.
+
+test("start_agent with workspaceId lists the workspace's panes instead of splitting", async () => {
+  const h = harness({
+    herdr: (args) => {
+      if (args[0] === "pane" && args[1] === "list") {
+        assert.deepEqual(args, ["pane", "list", "--workspace", "ws-1"]);
+        return { ok: true, data: { panes: [{ pane_id: "%9" }] } };
+      }
+      return { ok: true, data: {} };
+    },
+  });
+  const r = await run(h, "devcontainer_herdr_start_agent", {
+    hostPath: "/Users/me/code/tools/repo.worktrees/feat",
+    workspaceId: "ws-1",
+  });
+  assert.equal(r.isError, undefined, JSON.stringify(r.details));
+  assert.equal(r.details.paneId, "%9");
+  assert.equal(r.details.reusedWorkspaceId, "ws-1");
+  assert.ok(!h.calls.some((c) => c[1] === "split"), "no pane is split");
+
+  const run_ = h.calls.find((c) => c[1] === "run")!;
+  assert.equal(run_[2], "%9", "runs in the workspace's own pane");
+});
+
+test("start_agent ignores split/focus when workspaceId is passed", async () => {
+  const h = harness({
+    herdr: (args) => {
+      if (args[0] === "pane" && args[1] === "list") {
+        return { ok: true, data: { panes: [{ id: "%1" }] } };
+      }
+      return { ok: true, data: {} };
+    },
+  });
+  await run(h, "devcontainer_herdr_start_agent", {
+    workspaceId: "ws-1",
+    split: "down",
+    focus: true,
+  });
+  assert.ok(!h.calls.some((c) => c[1] === "split"));
+});
+
+test("start_agent fails PANE_GONE when the workspace has no pane", async () => {
+  const h = harness({
+    herdr: (args) => {
+      if (args[0] === "pane" && args[1] === "list") {
+        return { ok: true, data: { panes: [] } };
+      }
+      return { ok: true, data: {} };
+    },
+  });
+  const r = await run(h, "devcontainer_herdr_start_agent", { workspaceId: "ws-1" });
+  assert.equal(r.isError, true);
+  assert.equal(r.details.error.code, "PANE_GONE");
+  assert.match(r.details.error.message, /ws-1/);
+});
+
+test("start_agent maps a pane-list failure to HERDR_FAILED when workspaceId is passed", async () => {
+  const h = harness({
+    herdr: (args) => {
+      if (args[0] === "pane" && args[1] === "list") {
+        return { ok: false, message: "no such workspace" };
+      }
+      return { ok: true, data: {} };
+    },
+  });
+  const r = await run(h, "devcontainer_herdr_start_agent", { workspaceId: "ws-1" });
+  assert.equal(r.isError, true);
+  assert.equal(r.details.error.code, "HERDR_FAILED");
+  assert.match(r.details.error.message, /no such workspace/);
 });

@@ -166,7 +166,7 @@ not confuse them in docs or a grep.
 | --- | --- |
 | `devcontainer_herdr_worktree_path` | Derives the host path for a branch under the `<repo>.worktrees/<slug>` sibling convention, and the container path for it. Creates nothing, never calls `herdr`. |
 | `devcontainer_herdr_worktree_create` | The same resolution, then `herdr worktree create`, then asserts the new checkout's `.git` link is relative. |
-| `devcontainer_herdr_start_agent` | Splits a Herdr pane and launches an agent inside the container in it. Returns a `paneId`. |
+| `devcontainer_herdr_start_agent` | Launches an agent inside the container. With `workspaceId` (from `worktree_create`'s `openWorkspaceId`), runs in the pane that workspace already has; without it, splits a new Herdr pane. Returns a `paneId`. |
 
 ### Two path vocabularies
 
@@ -193,6 +193,24 @@ a rebuild — not a retry.
 checkout's `gitdir:` link names a host path that does not resolve inside the
 container. Fix it with `worktree.useRelativePaths=true` on the **host** git
 (git ≥ 2.48), then remove and recreate the worktree.
+
+### Create, then attach — one pane, not two
+
+`herdr worktree create` always opens a new Herdr workspace with a host-shell
+pane in it, whether or not the caller wants one — that's Herdr's own
+behavior, not this extension's. Calling `devcontainer_herdr_start_agent`
+without `workspaceId` afterwards does not use that pane: it splits a *second*
+one off pi's own pane instead, leaving the first sitting idle with nothing to
+close it — `herdr_worktree_remove` only knows to close the workspace Herdr
+itself opened, not an unrelated split pane it has no record of.
+
+Passing `workspaceId` — `worktree_create`'s `openWorkspaceId` result — avoids
+both problems: `start_agent` runs the agent in the pane that workspace
+already has (`herdr pane list --workspace <id>`) instead of splitting, so
+there is one pane per worktree, and removing the worktree closes it along
+with the workspace. This is the first-class create-then-attach path; the
+split behavior remains for attaching to a worktree that already existed
+before this call.
 
 ### After the start
 

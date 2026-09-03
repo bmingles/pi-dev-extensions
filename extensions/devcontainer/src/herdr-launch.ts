@@ -96,7 +96,15 @@ export interface PaneSplitOpts {
   focus: boolean;
 }
 
-/** `herdr pane split --current --direction <dir> --cwd <hostPath> [--focus|--no-focus] --json` */
+/**
+ * `herdr pane split --current --direction <dir> --cwd <hostPath> [--focus|--no-focus]`
+ *
+ * No `--json`: verified live (0.8.2) that `pane split`'s response is JSON with or without
+ * the flag, and that some sibling `pane`/`agent` subcommands (`pane run`, `agent get`,
+ * `agent rename` — see `herdr-tools.ts`) reject it outright as an unrecognized option. Since
+ * it does nothing where it's accepted and breaks parsing where it isn't, it is dropped from
+ * every call in this launcher rather than kept per-command.
+ */
 export function paneSplitArgs(opts: PaneSplitOpts): string[] {
   return [
     "pane",
@@ -107,7 +115,6 @@ export function paneSplitArgs(opts: PaneSplitOpts): string[] {
     "--cwd",
     opts.hostPath,
     opts.focus ? "--focus" : "--no-focus",
-    "--json",
   ];
 }
 
@@ -140,4 +147,23 @@ export function extractPaneId(d: unknown): string | undefined {
     if (fromPane) return fromPane;
   }
   return pickStr(o, "pane_id", "paneId", "id");
+}
+
+/**
+ * Tolerantly pull the first pane id out of a `pane list --workspace <id>` response — used to
+ * retarget an already-open workspace (e.g. the one `worktree create` opens) instead of
+ * splitting a new pane. `panes` array, or the response itself as an array; same key
+ * variants as {@link extractPaneId}. Not exhaustive on the same grounds — `pane list`'s
+ * shape has not been observed live, only its error envelope.
+ */
+export function extractFirstPaneId(d: unknown): string | undefined {
+  const list = Array.isArray(d)
+    ? d
+    : d && typeof d === "object" && Array.isArray((d as Record<string, unknown>).panes)
+    ? (d as Record<string, unknown>).panes as unknown[]
+    : undefined;
+  if (!list || list.length === 0) return undefined;
+  const first = list[0];
+  if (!first || typeof first !== "object") return undefined;
+  return pickStr(first as Record<string, unknown>, "pane_id", "paneId", "id");
 }
