@@ -24,6 +24,17 @@ export interface RunHerdrOpts {
   timeoutMs?: number;
   signal?: AbortSignal;
   env?: NodeJS.ProcessEnv;
+  /**
+   * Treat a clean exit (code 0, nothing on stderr) as success even when stdout has no
+   * parseable JSON — for a command whose caller only needs "did it error", never `.data`.
+   * Live-verified against `pane run`: it exits 0 with empty stdout on at least one Herdr
+   * build (the command it typed into the pane did run — `docker exec` visibly attached),
+   * so without this the caller sees a false `exited 0 with no parseable output` failure for
+   * a call that actually worked. Does not relax a nonzero exit or a `{"error": …}` envelope
+   * — those are still real failures. Default `false`, so every other call site keeps
+   * today's stricter behavior.
+   */
+  tolerateEmptySuccess?: boolean;
 }
 
 /** Parse the last JSON object in a possibly-mixed stdout buffer. */
@@ -142,6 +153,10 @@ export function runHerdr<T = unknown>(
         return;
       }
       const firstErrLine = stderr.split(/\r?\n/).find((l) => l.trim());
+      if (opts.tolerateEmptySuccess && exitCode === 0 && !firstErrLine) {
+        finish({ ok: true, data: undefined as T });
+        return;
+      }
       finish({
         ok: false,
         message: firstErrLine

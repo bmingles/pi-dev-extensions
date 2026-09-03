@@ -574,12 +574,16 @@ export function registerStartAgentTool(
           agentArgs: params.agentArgs,
           env: params.env,
         });
-        // No `--json`: verified live (0.8.2) that `pane run` rejects it as an unrecognized
-        // option (`unknown option: --json`) while its response is JSON either way — see the
-        // comment on `paneSplitArgs` in herdr-launch.ts.
+        // No `--json` (see the comment on `paneSplitArgs`), and `tolerateEmptySuccess`:
+        // live-tested against a real host and found `pane run` exits 0 with *empty* stdout
+        // on at least one Herdr build — no JSON envelope even without `--json` fighting it —
+        // while the command it typed genuinely ran (the `docker exec` visibly attached in
+        // the pane). Without the tolerance, that reads as `HERDR_FAILED` for a call that
+        // actually worked. This is the one call in the flow where that's safe: `run.data` is
+        // never read below, only whether the launch itself errored.
         const run = await deps.runHerdr<unknown>(
           ["pane", "run", paneId, commandLine],
-          { signal },
+          { signal, tolerateEmptySuccess: true },
         );
         if (!run.ok) {
           return fail<StartDetails & ErrorDetails>("HERDR_FAILED", run.message);
