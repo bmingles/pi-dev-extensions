@@ -9,6 +9,7 @@ import {
   DevcInfraError,
   ensureContainer,
   getMounts,
+  isContainerRunning,
   runInContainer,
   type SpawnFn,
 } from "./container.ts";
@@ -296,6 +297,36 @@ test("runInContainer returns a normal non-zero exit (not 125) as a result", asyn
   const { spawn } = makeSpawn({ code: 1 });
   const result = await runInContainer(INFO, ["false"], {}, spawn);
   assert.equal(result.code, 1);
+});
+
+// --- isContainerRunning ------------------------------------------------------
+//
+// Backs index.ts's cached-ContainerInfo invalidation (the cached-identity /
+// refreshed-mounts race in pi-devcontainer-herdr-validation.md § The bug): one
+// `docker inspect`, not a full `devcontainer up`.
+
+test("isContainerRunning is true for a running container", async () => {
+  const { spawn, calls } = makeSpawn({ stdout: "true\n", code: 0 });
+  assert.equal(await isContainerRunning("abc123", spawn), true);
+  assert.deepEqual(calls[0].args, [
+    "inspect",
+    "--format",
+    "{{.State.Running}}",
+    "abc123",
+  ]);
+});
+
+test("isContainerRunning is false for a stopped container", async () => {
+  const { spawn } = makeSpawn({ stdout: "false\n", code: 0 });
+  assert.equal(await isContainerRunning("abc123", spawn), false);
+});
+
+test("isContainerRunning is false when the container no longer exists (rebuild removed it)", async () => {
+  const { spawn } = makeSpawn({
+    stderr: "Error: No such container: abc123",
+    code: 1,
+  });
+  assert.equal(await isContainerRunning("abc123", spawn), false);
 });
 
 // --- getMounts -------------------------------------------------------------

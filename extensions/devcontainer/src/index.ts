@@ -51,6 +51,7 @@ import {
   type ContainerInfo,
   ensureContainer as containerUp,
   getMounts as containerGetMounts,
+  isContainerRunning,
 } from "./container.ts";
 import { isHomeDirectory } from "./paths.ts";
 import {
@@ -120,11 +121,25 @@ export default function (pi: ExtensionAPI) {
   // way) so a decline/no-UI refusal isn't re-prompted on every tool call.
   let homeDirGate: "approved" | Error | undefined;
 
-  /** Lazily start the container once, cache the ContainerInfo anchor, reuse thereafter. */
+  /**
+   * Lazily start the container once, cache the ContainerInfo anchor, and reuse it as long
+   * as it stays alive — revalidated with a cheap `docker inspect` on every call, not just
+   * the first.
+   */
   async function ensureContainer(
     ctx?: ExtensionContext,
   ): Promise<ContainerInfo> {
-    if (info) return info;
+    if (info) {
+      if (await isContainerRunning(info.containerId)) return info;
+      // The cached identity is dead — most likely a rebuild ran underneath this pi
+      // process: `docker rm` on the old container, then a fresh `docker run` sharing
+      // the same `devcontainer.local_folder` label but a new id. `containerGetMounts`
+      // re-resolves fresh on every call (see `read_host` and the Herdr tools below) and
+      // would silently disagree with this stale `containerId` — a `docker exec` built
+      // from it targets a container that no longer exists. Drop the anchor and fall
+      // through to re-resolve one that matches what's actually running now.
+      info = undefined;
+    }
     if (homeDirGate instanceof Error) throw homeDirGate;
     if (!starting) {
       // Everything below runs synchronously up to its first `await`, so

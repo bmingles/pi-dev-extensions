@@ -195,6 +195,28 @@ export async function getMounts(
   }));
 }
 
+/**
+ * Cheap "is this identity still good" check — one `docker inspect`, not a full
+ * `devcontainer up`. Backs `index.ts`'s cached-`ContainerInfo` invalidation: a rebuild
+ * *underneath a running pi* (`docker rm` of the old container, a fresh `docker run` sharing
+ * the same `devcontainer.local_folder` label) leaves the cached `containerId` pointing at
+ * nothing, while `getMounts` above re-resolves fresh on every call and would silently
+ * disagree with it. `false` covers both "removed" (`docker inspect` errors — no such
+ * container) and "exists but stopped" (`docker exec` needs a running container either way),
+ * so either case sends the caller back through `startContainer` to re-resolve.
+ */
+export async function isContainerRunning(
+  containerId: string,
+  spawn: SpawnFn = defaultSpawn,
+): Promise<boolean> {
+  const result = await spawnDocker(
+    ["inspect", "--format", "{{.State.Running}}", containerId],
+    {},
+    spawn,
+  );
+  return result.code === 0 && decode(result.stdout).trim() === "true";
+}
+
 interface SpawnDriverOptions {
   stdin?: Uint8Array | string;
   onStdout?: (chunk: Uint8Array) => void;
