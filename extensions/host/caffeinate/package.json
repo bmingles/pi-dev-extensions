@@ -1,0 +1,25 @@
+{
+  "name": "pi-extension-caffeinate",
+  "private": true,
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "pi-extension-core": "file:../../shared/extension-core"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.83.0",
+    "@types/node": "^22.20.1",
+    "typescript": "^5"
+  }
+}

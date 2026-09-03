@@ -15,8 +15,8 @@ _PI_DEV_EXTENSIONS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." >/dev/null 2>&1
 #
 # Nothing beyond `docker` has to be on PATH: the devcontainer extension drives
 # the container lifecycle in-process via its @devc-tools/core npm dependency
-# (see extensions/devcontainer/README.md), so there is no `devc` binary for
-# this script to find or configure.
+# (see extensions/host/devcontainer/README.md), so there is no `devc` binary
+# for this script to find or configure.
 
 function _pic_resolve_pi() {
   # Fast path: whatever node version is currently active in this shell.
@@ -38,7 +38,7 @@ function pic() {
     return 1
   }
   "$pi_bin" \
-    -e "$_PI_DEV_EXTENSIONS_DIR/extensions/caffeinate" \
-    -e "$_PI_DEV_EXTENSIONS_DIR/extensions/devcontainer" \
+    -e "$_PI_DEV_EXTENSIONS_DIR/extensions/host/caffeinate" \
+    -e "$_PI_DEV_EXTENSIONS_DIR/extensions/host/devcontainer" \
     "$@"
 }

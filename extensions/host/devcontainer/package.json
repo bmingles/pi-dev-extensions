@@ -1,0 +1,31 @@
+{
+  "name": "pi-extension-devcontainer",
+  "private": true,
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@devc-tools/core": "^0.1.4",
+    "pi-extension-core": "file:../../shared/extension-core",
+    "pi-extension-herdr-core": "file:../../shared/herdr-core",
+    "pi-extension-host-read-core": "file:../../shared/host-read-core"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.1",
+    "typescript": "^5"
+  }
+}
