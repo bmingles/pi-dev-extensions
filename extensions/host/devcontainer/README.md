@@ -138,15 +138,21 @@ scope for v1; a persisted taint set would be the durable fix (future phase).
 
 ## `devcontainer_herdr_*` — orchestrating container agents from a host Herdr
 
-Three tools for the topology where **pi runs on the host, Herdr runs on the
+Five tools for the topology where **pi runs on the host, Herdr runs on the
 host, and the agents run inside the container** — the orchestrator creates
 worktrees at host paths and fans agents out into the container that this
 extension already routes into. Background and the measurements behind each
 design choice:
 [`devc-dev/docs/herdr-host-orchestrator.md`](https://github.com/bmingles/devc-dev/blob/main/docs/herdr-host-orchestrator.md).
+The full workflow — branch naming, model selection, the Copilot trust
+overlay, `detected` vs `ready`, driving and cleaning up a pane — is written up
+once, in depth, in the package's
+[`devcontainer-agent-fleet`](../../../skills/devcontainer-agent-fleet/SKILL.md)
+skill; this section stays a tool reference.
 
 They **register only when a `herdr` binary resolves** (`HERDR_BIN_PATH` →
-`HERDR_BIN` → a `PATH` walk). An ordinary `pic` session never sees them.
+`HERDR_BIN` → a `PATH` walk). An ordinary `pic` session never sees them, and
+neither does the always-on orchestration nudge described below.
 
 Three places say whether they loaded, in increasing detail:
 
@@ -172,8 +178,51 @@ not confuse them in docs or a grep.
 | Tool | Does |
 | --- | --- |
 | `devcontainer_herdr_worktree_path` | Derives the host path for a branch under the `<repo>.worktrees/<slug>` sibling convention, and the container path for it. Creates nothing, never calls `herdr`. |
-| `devcontainer_herdr_worktree_create` | The same resolution, then `herdr worktree create`, then asserts the new checkout's `.git` link is relative. |
-| `devcontainer_herdr_start_agent` | Launches an agent inside the container. With `workspaceId` (from `worktree_create`'s `openWorkspaceId`), runs in the pane that workspace already has; without it, splits a new Herdr pane. Returns a `paneId`. See "The pane launcher" below for how the pane's command line is built. |
+| `devcontainer_herdr_worktree_create` | The same resolution, then `herdr worktree create`, then asserts the new checkout's `.git` link is relative. Pass `branch` (explicit) or `purpose` (derives `agent/<slug>`, disambiguated on collision). |
+| `devcontainer_herdr_start_agent` | Launches an agent inside the container. With `workspaceId` (from `worktree_create`'s `openWorkspaceId`), runs in the pane that workspace already has; without it, splits a new Herdr pane. Returns a `paneId` and a `startupState`. See "The pane launcher" below for how the pane's command line is built. |
+| `devcontainer_herdr_start_worktree_agent` | The one-call path: `worktree_create` then `start_agent`, chaining the create result's `hostPath`/`openWorkspaceId` through automatically. If create fails, its error is returned unchanged; if create succeeds but starting the agent fails, the worktree is **not** rolled back — the result names `hostPath`/`openWorkspaceId` for a retry against `start_agent`. |
+| `devcontainer_herdr_worktree_list` | Lists a repo's worktrees in both path vocabularies, plus `containerVisible` (whether any bind mount of the routed container covers the worktree) — the thing `pi-herdr`'s own `herdr_worktree_list` can't report and, separately, rejects `workspaceId`+`cwd` together despite its schema suggesting both work (an upstream bug, not this tool's). |
+
+### Structured `model`, and the escape hatch
+
+`devcontainer_herdr_start_agent` and `devcontainer_herdr_start_worktree_agent`
+both take an optional `model` (e.g. `"opus"`), translated to the flag the
+agent kind's own CLI understands via `herdr-launch.ts`'s
+`modelFlagForAgentKind` — currently `claude`, `copilot` and `pi`, all three
+measured to take `--model <value>` (see that function's doc comment for the
+exact transcripts and per-kind caveats: claude's value is a fixed alias,
+copilot's and pi's are closer to a free-form model id/pattern). A kind with
+no known flag fails `MODEL_UNSUPPORTED` — put the flag directly in
+`agentArgs` instead of guessing one. An explicit `--model` already present in
+`agentArgs` always wins over `model`, which is then dropped — stated in the
+result text, never silently, since two `--model` flags is a CLI error on
+most agents.
+
+### The folder-trust overlay has no bypass flag (as of this writing)
+
+Copilot's first run in a fresh worktree shows an interactive "do you trust
+the files in this folder" overlay. Measured directly against `copilot
+--help`, `copilot help permissions` and `copilot help config` (`@github/copilot`
+1.0.83): `--allow-all-tools`/`--allow-all`/`--yolo` govern *tool* permissions,
+a separate system from folder trust, and there is no flag or environment
+variable that pre-accepts the trust prompt itself. (`trustedFolders` exists,
+but only as a config-file setting under `~/.copilot/config.json` — not a
+launch-time flag, so it isn't wired into `start_agent`.) No `trustFolder`
+parameter is added for this reason; clear the overlay with `pi-herdr`'s
+`herdr_send_keys` (arrow keys + Enter) — never `herdr_send_prompt`, which
+types text a multi-choice overlay does not read as a selection.
+
+### Startup state: `detected`, `ready`, `unknown`
+
+`start_agent`/`start_worktree_agent` return `startupState`. `"detected"`
+means Herdr's own poll matched a process rule — nothing more, and **not**
+that the agent finished initializing. Passing `waitForReady: true` asks for
+an additional check against the kind's own "ready to accept input" pane
+pattern; no kind has a measured pattern yet (that needs a live host + built
+devcontainer + Herdr to capture — see `herdr-launch.ts`'s
+`readyPatternForAgentKind`), so `waitForReady` currently always resolves to
+`"unknown"` rather than `"ready"`. Read the pane (`herdr_read_agent`) before
+reporting success to a human either way.
 
 ### Two path vocabularies
 
@@ -274,6 +323,18 @@ Three caveats come with the launch, all inherited from asserting identity with
 - **`shift+tab` does not survive `docker exec -it`.** It will not cycle Claude
   Code's permission mode — pass an explicit `--permission-mode` in `agentArgs`
   instead. Plain keys and `herdr agent prompt` work normally.
+
+### The always-on orchestration nudge
+
+Beyond the tools and the skill, `before_agent_start` appends a few sentences
+to the system prompt — gated on the same `herdrAvailable` flag as the tools,
+so a session with no `herdr` binary sees nothing — naming `start_worktree_agent`
+as the default way to isolate substantial new work in a worktree and hand it
+to an agent, and pointing at the `devcontainer-agent-fleet` skill for
+everything else. It's a default, not a law: a one-line fix, a question, or
+work the user is clearly doing themselves is unaffected. The block is a
+plain constant with no per-turn interpolation, so it's byte-identical every
+turn — it does not defeat the provider's prompt-prefix cache.
 
 ## Home-directory start confirmation
 

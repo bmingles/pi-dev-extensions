@@ -10,6 +10,7 @@
       "extensions/vm/gondolin/src/index.ts",
       "extensions/host/caffeinate/src/index.ts",
       "extensions/container/herdr-worktrees/src/index.ts"
-    ]
+    ],
+    "skills": ["skills"]
   }
 }

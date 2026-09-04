@@ -49,6 +49,66 @@ export function commandForAgentKind(kind: string): string {
   return KIND_EXECUTABLE[kind] ?? kind;
 }
 
+/**
+ * The flag a kind's own CLI takes a model on, keyed by the Herdr `--kind` value. This is
+ * knowledge about *third-party CLIs*, not about Herdr — it will drift independently of
+ * `KIND_EXECUTABLE` above, and carries the same warning: keep it in this one named table
+ * rather than letting the mapping leak into call sites.
+ *
+ * Measured directly against each CLI's own `--help` (`agent-orchestration-ergonomics` plan,
+ * § Step 1.1 — see the plan doc for the exact transcripts), since none of the three could be
+ * launched live in this environment (no Docker, no target devcontainer):
+ *
+ * - `claude --help` (this host's install, `claude` 2.x): `--model <model>` — "Provide an
+ *   alias for the latest model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name."
+ *   A bare alias is genuinely all that's needed.
+ * - `copilot --help` (`@github/copilot` 1.0.83, installed fresh from the npm registry to
+ *   read its `--help` since no `copilot` binary was preinstalled here): `--model <model>` —
+ *   "Set the AI model to use", example `copilot --model gpt-5.4`. Takes a model id, not a
+ *   cross-CLI alias — callers must pass a name `copilot` itself recognizes.
+ * - `pi --help` (this host's own `pi` CLi, `@earendil-works/pi-coding-agent`): `--model
+ *   <pattern>` — a fuzzy pattern matched against whatever providers/models are configured
+ *   (`resolveCliModel` in `main.js`), not a fixed alias enum the way claude's is. A value
+ *   that is unambiguous against claude's own naming (e.g. "opus", "sonnet") is expected to
+ *   work when Anthropic is pi's configured provider, but this is pattern-matching behavior
+ *   rather than a guaranteed 1:1 alias table — flagging the difference rather than pretending
+ *   it's identical to claude's.
+ *
+ * Every other kind (~17 of Herdr's ~20) has no entry: `agentArgs` is the escape hatch for
+ * anything not covered here, exactly as `KIND_EXECUTABLE` leaves uncovered kinds to `command`.
+ */
+const MODEL_FLAG_FOR_KIND: Record<string, string> = {
+  claude: "--model",
+  copilot: "--model",
+  pi: "--model",
+};
+
+/** The flag a kind's CLI takes a model on, or `undefined` when we don't know one. */
+export function modelFlagForAgentKind(kind: string): string | undefined {
+  return MODEL_FLAG_FOR_KIND[kind];
+}
+
+/**
+ * The pane-screen pattern that means "`kind` finished starting and is accepting input",
+ * keyed by Herdr `--kind`. **Empty**, deliberately: the plan's § Step 1.3 ("what 'ready'
+ * looks like") requires launching each kind in a real Herdr pane and capturing its screen at
+ * the moment it accepts input — a live host + built devcontainer + Herdr, none of which this
+ * environment (no Docker, no `devc`, no live agent panes) can provide. Per the plan's own
+ * concept boundary ("if Step 1.3 finds no stable pattern for a kind, that kind simply never
+ * reports ready — do not fabricate one from a timeout"), leaving this table empty is the
+ * correct, honest state until someone can run that capture on a real host — see
+ * `readyStateForAgentKind` in `herdr-tools.ts` for how the tools degrade to `"unknown"` while
+ * it's empty, and the plan doc's Step 1 section for exactly what to measure before adding an
+ * entry (plus a note on the unverified shape of `herdr agent read`'s response this table's
+ * first consumer will need to parse).
+ */
+const READY_PATTERN_FOR_KIND: Record<string, RegExp> = {};
+
+/** The ready-pattern for a kind, or `undefined` when none is known (see the table above). */
+export function readyPatternForAgentKind(kind: string): RegExp | undefined {
+  return READY_PATTERN_FOR_KIND[kind];
+}
+
 export interface AgentCommandLineOpts {
   /** The Herdr agent kind, asserted via `HERDR_AGENT`. */
   agent: string;
@@ -62,6 +122,22 @@ export interface AgentCommandLineOpts {
   agentArgs?: string[];
   /** Extra `-e K=V` on the `docker exec`. */
   env?: Record<string, string>;
+  /**
+   * A model for `agent`'s own CLI (e.g. `"opus"`), translated via {@link modelFlagForAgentKind}
+   * and appended after `agentArgs`. The caller (`herdr-tools.ts`) is responsible for the
+   * MODEL_UNSUPPORTED / already-in-agentArgs precedence checks — by the time it reaches here,
+   * `model` is expected to be both wanted and appendable; this only handles the "no known flag
+   * for this kind" case defensively, by appending nothing.
+   */
+  model?: string;
+}
+
+/** `agentArgs`, plus a trailing `[flag, model]` when a flag is known for `opts.agent`. */
+function effectiveAgentArgs(opts: AgentCommandLineOpts): string[] {
+  const base = opts.agentArgs ?? [];
+  if (!opts.model) return base;
+  const flag = modelFlagForAgentKind(opts.agent);
+  return flag ? [...base, flag, opts.model] : base;
 }
 
 /** The single line handed to `herdr pane run`. */
@@ -71,7 +147,7 @@ export function buildAgentCommandLine(opts: AgentCommandLineOpts): string {
   ) => ["-e", shellQuote(`${key}=${value}`)]);
   // Quoted as one unit, so a key containing shell metacharacters is inert rather than
   // needing a validation rule of its own.
-  const inner = [opts.command, ...(opts.agentArgs ?? [])]
+  const inner = [opts.command, ...effectiveAgentArgs(opts)]
     .map(shellQuote)
     .join(" ");
   return [
@@ -135,7 +211,7 @@ export function buildAgentCommandLineViaDevc(
     subcommand,
     "--cwd",
     shellQuote(opts.containerPath),
-    ...(opts.agentArgs ?? []).map(shellQuote),
+    ...effectiveAgentArgs(opts).map(shellQuote),
   ].join(" ");
 }
 

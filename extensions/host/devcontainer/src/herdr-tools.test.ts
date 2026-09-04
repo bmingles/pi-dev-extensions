@@ -80,11 +80,13 @@ function run(h: Harness, name: string, params: unknown): Promise<any> {
   return tool.execute("id", params, undefined, undefined, undefined);
 }
 
-test("all three tools register under the devcontainer_herdr_ prefix", () => {
+test("all five tools register under the devcontainer_herdr_ prefix", () => {
   const h = harness();
   assert.deepEqual([...h.tools.keys()].sort(), [
     "devcontainer_herdr_start_agent",
+    "devcontainer_herdr_start_worktree_agent",
     "devcontainer_herdr_worktree_create",
+    "devcontainer_herdr_worktree_list",
     "devcontainer_herdr_worktree_path",
   ]);
   // Never the container-side `herdr_devc_*` names, which are a different topology.
@@ -594,4 +596,238 @@ test("start_agent maps a pane-list failure to HERDR_FAILED when workspaceId is p
   assert.equal(r.isError, true);
   assert.equal(r.details.error.code, "HERDR_FAILED");
   assert.match(r.details.error.message, /no such workspace/);
+});
+
+// ---- devcontainer_herdr_start_agent — structured model ----------------------
+
+test("start_agent appends the model flag for a covered kind", async () => {
+  const h = startHarness();
+  await run(h, "devcontainer_herdr_start_agent", { agent: "claude", model: "opus" });
+  const line = h.calls.find((c) => c[1] === "run")![3];
+  assert.ok(line.includes("'\\''--model'\\'' '\\''opus'\\'''"), line);
+});
+
+test("start_agent reports startupState: 'detected' on a normal success", async () => {
+  const h = startHarness();
+  const r = await run(h, "devcontainer_herdr_start_agent", {});
+  assert.equal(r.details.startupState, "detected");
+});
+
+test("start_agent fails MODEL_UNSUPPORTED for a kind with no known model flag, before ever calling herdr", async () => {
+  const h = startHarness();
+  const r = await run(h, "devcontainer_herdr_start_agent", { agent: "codex", model: "big" });
+  assert.equal(r.isError, true);
+  assert.equal(r.details.error.code, "MODEL_UNSUPPORTED");
+  assert.match(r.details.error.message, /codex/);
+  assert.deepEqual(h.calls, [], "no pane is split, nothing is launched");
+});
+
+test("start_agent drops `model` when agentArgs already spells out --model, and says so", async () => {
+  const h = startHarness();
+  const r = await run(h, "devcontainer_herdr_start_agent", {
+    agent: "claude",
+    model: "opus",
+    agentArgs: ["--model", "sonnet"],
+  });
+  assert.equal(r.isError, undefined);
+  const line = h.calls.find((c) => c[1] === "run")![3];
+  // Exactly one --model, the one from agentArgs, and it isn't followed by a second one.
+  const modelCount = (line.match(/--model/g) ?? []).length;
+  assert.equal(modelCount, 1, line);
+  assert.ok(line.includes("'\\''--model'\\'' '\\''sonnet'\\'''"), line);
+  assert.match(r.content[0].text, /ignored because agentArgs already spells out --model/);
+});
+
+test("start_agent waitForReady resolves to 'unknown' — no kind has a measured ready pattern yet", async () => {
+  const h = startHarness();
+  const r = await run(h, "devcontainer_herdr_start_agent", { waitForReady: true });
+  assert.equal(r.isError, undefined);
+  assert.equal(r.details.startupState, "unknown");
+});
+
+// ---- devcontainer_herdr_worktree_create — branch/purpose derivation ---------
+
+test("worktree_create requires branch or purpose", async () => {
+  const h = harness();
+  const r = await run(h, "devcontainer_herdr_worktree_create", {});
+  assert.equal(r.isError, true);
+  assert.equal(r.details.error.code, "BRANCH_OR_PURPOSE_REQUIRED");
+  assert.deepEqual(h.calls, [], "herdr must not be called");
+});
+
+test("worktree_create derives agent/<slug> from purpose when branch is omitted", async () => {
+  const h = harness({
+    herdr: () => ({ ok: true, data: { worktree: {} } }),
+  });
+  const r = await run(h, "devcontainer_herdr_worktree_create", {
+    purpose: "Fix the flaky retry test!",
+  });
+  assert.equal(r.isError, undefined, JSON.stringify(r.details));
+  assert.equal(r.details.branch, "agent/fix-the-flaky-retry-test");
+  const args = h.calls[0];
+  assert.equal(args[args.indexOf("--branch") + 1], "agent/fix-the-flaky-retry-test");
+});
+
+test("worktree_create disambiguates a derived-name collision with a numeric suffix", async () => {
+  const h = harness({
+    // The first two candidate paths already exist on the host; the third is free.
+    pathExists: (p) =>
+      p.endsWith("agent-fix-flaky-test") || p.endsWith("agent-fix-flaky-test-2"),
+    herdr: () => ({ ok: true, data: { worktree: {} } }),
+  });
+  const r = await run(h, "devcontainer_herdr_worktree_create", { purpose: "fix flaky test" });
+  assert.equal(r.isError, undefined, JSON.stringify(r.details));
+  assert.equal(r.details.branch, "agent/fix-flaky-test-3");
+});
+
+test("worktree_create fails DERIVED_BRANCH_EXHAUSTED when every suffix collides, without calling herdr", async () => {
+  const h = harness({ pathExists: () => true });
+  const r = await run(h, "devcontainer_herdr_worktree_create", { purpose: "busy purpose" });
+  assert.equal(r.isError, true);
+  assert.equal(r.details.error.code, "DERIVED_BRANCH_EXHAUSTED");
+  assert.deepEqual(h.calls, []);
+});
+
+test("worktree_create still fails PATH_EXISTS (not DERIVED_BRANCH_EXHAUSTED) for an explicit branch collision", async () => {
+  // An explicit `branch` never gets the retry-with-suffix treatment — a collision on it is
+  // always an error, exactly as it was before `purpose` existed.
+  const h = harness({ pathExists: () => true });
+  const r = await run(h, "devcontainer_herdr_worktree_create", { branch: "feat" });
+  assert.equal(r.isError, true);
+  assert.equal(r.details.error.code, "PATH_EXISTS");
+});
+
+// ---- devcontainer_herdr_start_worktree_agent --------------------------------
+
+function worktreeAgentHarness(
+  over: Partial<HerdrToolDeps> & { herdr?: (args: string[]) => HerdrResult<unknown> } = {},
+) {
+  return harness({
+    herdr: (args) => {
+      if (args[0] === "worktree" && args[1] === "create") {
+        return {
+          ok: true,
+          data: { worktree: { branch: "agent/feat", open_workspace_id: "ws-1" } },
+        };
+      }
+      if (args[0] === "pane" && args[1] === "list") {
+        return { ok: true, data: { panes: [{ pane_id: "%9" }] } };
+      }
+      return { ok: true, data: {} };
+    },
+    ...over,
+  });
+}
+
+test("start_worktree_agent creates a worktree and starts an agent in it, in one call", async () => {
+  const h = worktreeAgentHarness();
+  const r = await run(h, "devcontainer_herdr_start_worktree_agent", { purpose: "new feature" });
+  assert.equal(r.isError, undefined, JSON.stringify(r.details));
+  assert.equal(r.details.branch, "agent/feat");
+  assert.equal(r.details.openWorkspaceId, "ws-1");
+  assert.equal(r.details.paneId, "%9");
+  assert.equal(r.details.startupState, "detected");
+
+  const order = h.calls.map((c) => `${c[0]} ${c[1]}`);
+  assert.deepEqual(order, [
+    "worktree create",
+    "pane list", // retargets into the workspace `worktree create` opened — no `pane split`
+    "pane run",
+    "agent get",
+    "agent rename",
+  ]);
+});
+
+test("start_worktree_agent returns create's own error unchanged when create fails, and never starts anything", async () => {
+  const h = harness({ pathExists: () => true });
+  const r = await run(h, "devcontainer_herdr_start_worktree_agent", { branch: "feat" });
+  assert.equal(r.isError, true);
+  assert.equal(r.details.error.code, "PATH_EXISTS");
+  assert.deepEqual(h.calls, [], "nothing was created, nothing was launched");
+});
+
+test("start_worktree_agent leaves the worktree in place when the start half fails", async () => {
+  const h = worktreeAgentHarness({
+    herdr: (args) => {
+      if (args[0] === "worktree" && args[1] === "create") {
+        return {
+          ok: true,
+          data: { worktree: { branch: "agent/feat", open_workspace_id: "ws-1" } },
+        };
+      }
+      if (args[0] === "pane" && args[1] === "list") {
+        return { ok: true, data: { panes: [] } }; // PANE_GONE
+      }
+      return { ok: true, data: {} };
+    },
+  });
+  const r = await run(h, "devcontainer_herdr_start_worktree_agent", { purpose: "new feature" });
+  assert.equal(r.isError, true);
+  assert.equal(r.details.error.code, "PANE_GONE");
+  assert.equal(r.details.worktreeCreated, true);
+  assert.equal(r.details.openWorkspaceId, "ws-1");
+  assert.ok(r.details.hostPath, "hostPath is named so the caller can retry against it");
+  assert.match(r.content[0].text, /NOT removed/);
+  assert.match(r.content[0].text, /devcontainer_herdr_start_agent/);
+});
+
+// ---- devcontainer_herdr_worktree_list ---------------------------------------
+
+test("worktree_list reports containerVisible true and false, and never guesses a containerPath", async () => {
+  const h = harness({
+    herdr: (args) => {
+      if (args[0] === "worktree" && args[1] === "list") {
+        return {
+          ok: true,
+          data: {
+            worktrees: [
+              { path: "/Users/me/code/tools/repo.worktrees/feat", branch: "feat" },
+              { path: "/Users/me/elsewhere", branch: "orphan" },
+            ],
+          },
+        };
+      }
+      return { ok: true, data: {} };
+    },
+  });
+  const r = await run(h, "devcontainer_herdr_worktree_list", {});
+  assert.equal(r.isError, undefined, JSON.stringify(r.details));
+  assert.equal(r.details.worktrees.length, 2);
+
+  const visible = r.details.worktrees.find((w: { branch: string }) => w.branch === "feat");
+  assert.equal(visible.containerVisible, true);
+  assert.equal(visible.containerPath, "/workspaces/tools/repo.worktrees/feat");
+
+  const hidden = r.details.worktrees.find((w: { branch: string }) => w.branch === "orphan");
+  assert.equal(hidden.containerVisible, false);
+  assert.equal(hidden.containerPath, null);
+});
+
+test("worktree_list passes --cwd, never --workspace, routing around the upstream conflict", async () => {
+  const h = harness({
+    herdr: (args) => {
+      if (args[0] === "worktree" && args[1] === "list") {
+        assert.deepEqual(args, [
+          "worktree",
+          "list",
+          "--cwd",
+          "/Users/me/code/tools/repo",
+          "--json",
+        ]);
+        return { ok: true, data: { worktrees: [] } };
+      }
+      return { ok: true, data: {} };
+    },
+  });
+  const r = await run(h, "devcontainer_herdr_worktree_list", {});
+  assert.equal(r.isError, undefined);
+  assert.deepEqual(r.details.worktrees, []);
+});
+
+test("worktree_list fails NOT_A_REPO rather than calling herdr with a bad --cwd", async () => {
+  const h = harness({ gitRevParseTopLevel: () => undefined });
+  const r = await run(h, "devcontainer_herdr_worktree_list", {});
+  assert.equal(r.isError, true);
+  assert.equal(r.details.error.code, "NOT_A_REPO");
+  assert.deepEqual(h.calls, []);
 });

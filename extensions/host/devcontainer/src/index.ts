@@ -489,14 +489,60 @@ export default function (pi: ExtensionAPI, probe?: SideProbe) {
       // routed into a container that doesn't exist).
       return;
     }
-    const localLine = `Current working directory: ${hostCwd}`;
-    const containerLine =
-      `Current working directory: ${active.remoteWorkspaceFolder} (devcontainer via devc; host workspace ${hostCwd})`;
-    const systemPrompt = event.systemPrompt.includes(localLine)
-      ? event.systemPrompt.replace(localLine, containerLine)
-      : `${event.systemPrompt}\n\n${containerLine}`;
-    return { systemPrompt };
+    return {
+      systemPrompt: buildAgentStartSystemPrompt(
+        event.systemPrompt,
+        hostCwd,
+        active.remoteWorkspaceFolder,
+        herdrAvailable,
+      ),
+    };
   });
+}
+
+/**
+ * The always-present nudge toward the default orchestration workflow — Step 10 of the
+ * `agent-orchestration-ergonomics` plan. A skill only helps an agent already reaching for
+ * these tools; this is the sentence that makes it reach. Kept to a few lines and stated as a
+ * default, not a law: a one-line fix, a question, or work the user is clearly doing
+ * themselves must not get a worktree. Detail belongs in the `devcontainer-agent-fleet`
+ * skill this points at, not here — this block must stay a plain constant (no per-turn
+ * interpolation) so the `before_agent_start` append below is byte-identical every turn.
+ */
+const AGENT_ORCHESTRATION_DOCTRINE =
+  "Default for substantial new work: isolate it in a Git worktree and hand it to an agent " +
+  "in the devcontainer, rather than doing the work yourself in the main checkout. Use " +
+  "devcontainer_herdr_start_worktree_agent as the one-call way to create the worktree and " +
+  "start the agent together. This is a default, not a law — a one-line fix, a question, or " +
+  "work the user is clearly doing themselves does not need a worktree. See the " +
+  "devcontainer-agent-fleet skill for branch naming, model selection, the Copilot trust " +
+  "overlay, and why 'detected' does not mean 'ready'.";
+
+/**
+ * The `before_agent_start` system-prompt rewrite: swap the cwd line for the container's, then
+ * chain the orchestration doctrine onto the end when `herdrAvailable` — never replacing what
+ * came before. Extracted as a pure function (same posture as `statusLine`/`readyMessage`
+ * above) so it's testable without a real container: the handler itself needs a live
+ * `ensureContainer` to reach this point, which needs Docker.
+ */
+export function buildAgentStartSystemPrompt(
+  systemPrompt: string,
+  hostCwd: string,
+  remoteWorkspaceFolder: string,
+  herdrAvailable: boolean,
+): string {
+  const localLine = `Current working directory: ${hostCwd}`;
+  const containerLine =
+    `Current working directory: ${remoteWorkspaceFolder} (devcontainer via devc; host workspace ${hostCwd})`;
+  const withCwd = systemPrompt.includes(localLine)
+    ? systemPrompt.replace(localLine, containerLine)
+    : `${systemPrompt}\n\n${containerLine}`;
+  // Gated on the same `herdrAvailable` flag that gates the tools themselves: a session with
+  // no `herdr` binary must see nothing here, since this would be advice about tools that
+  // don't exist. `AGENT_ORCHESTRATION_DOCTRINE` is a plain constant (no per-turn
+  // interpolation), so this append is byte-identical turn to turn — a system prompt that
+  // changes per turn would invalidate the provider's prefix cache.
+  return herdrAvailable ? `${withCwd}\n\n${AGENT_ORCHESTRATION_DOCTRINE}` : withCwd;
 }
 
 function describeError(err: unknown): string {

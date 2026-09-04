@@ -13,8 +13,12 @@ checked fact is each extension's `requireSide` declaration (see
 - **`extensions/host/`** — runs on the **host**
   - **[`devcontainer`](#extensionshostdevcontainer)** — routes pi's built-in
     tools into a devcontainer via `devc`; also, when a `herdr` binary is
-    present, three tools for creating container-visible worktrees and
-    launching container agents into Herdr panes
+    present, five tools for creating container-visible worktrees and
+    launching container agents into Herdr panes, a
+    [`devcontainer-agent-fleet`](skills/devcontainer-agent-fleet/SKILL.md)
+    skill covering the whole workflow, and an always-on system-prompt nudge
+    toward it — a package that mutates the system prompt and ships its own
+    skill is doing more than a reader of this list would otherwise expect
   - **[`caffeinate`](#extensionshostcaffeinate)** — keeps the Mac awake
     (`caffeinate`) while an agent run is active
 - **`extensions/vm/`** — also runs on the **host**. ⚠️ The name is the one

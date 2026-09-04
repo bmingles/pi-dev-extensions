@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { SideProbe } from "pi-extension-core";
-import factory, { readyMessage, statusLine } from "./index.ts";
+import factory, { buildAgentStartSystemPrompt, readyMessage, statusLine } from "./index.ts";
 
 /** The tools this extension has always registered, with no Herdr anywhere. */
 const BASELINE = [
@@ -59,7 +59,7 @@ test("with no herdr resolvable, exactly the existing tools register", () => {
   );
 });
 
-test("with HERDR_BIN_PATH set, the three Herdr tools register alongside them", () => {
+test("with HERDR_BIN_PATH set, the five Herdr tools register alongside them", () => {
   const names = load({
     HERDR_BIN_PATH: "/opt/herdr/bin/herdr",
     HERDR_BIN: undefined,
@@ -70,6 +70,8 @@ test("with HERDR_BIN_PATH set, the three Herdr tools register alongside them", (
     "devcontainer_herdr_worktree_path",
     "devcontainer_herdr_worktree_create",
     "devcontainer_herdr_start_agent",
+    "devcontainer_herdr_start_worktree_agent",
+    "devcontainer_herdr_worktree_list",
   ]);
 });
 
@@ -151,4 +153,58 @@ test("on the container side, session_start notifies of the refusal", () => {
     for (const k of Object.keys(process.env)) delete process.env[k];
     Object.assign(process.env, saved);
   }
+});
+
+// ---- before_agent_start: the orchestration doctrine (Step 10) --------------
+// Extracted as a pure function (`buildAgentStartSystemPrompt`) since the real handler needs a
+// live `ensureContainer`, which needs Docker — same posture as `statusLine`/`readyMessage`.
+
+test("the cwd line is rewritten to the container path either way", () => {
+  const prompt = buildAgentStartSystemPrompt(
+    "You are pi.\n\nCurrent working directory: /Users/me/x\n\nOther stuff.",
+    "/Users/me/x",
+    "/workspaces/x",
+    false,
+  );
+  assert.match(prompt, /Current working directory: \/workspaces\/x/);
+  assert.ok(!prompt.includes("Current working directory: /Users/me/x"));
+});
+
+test("the doctrine block is ABSENT when herdrAvailable is false", () => {
+  const prompt = buildAgentStartSystemPrompt(
+    "You are pi.\n\nCurrent working directory: /Users/me/x",
+    "/Users/me/x",
+    "/workspaces/x",
+    false,
+  );
+  assert.ok(!prompt.includes("devcontainer_herdr_start_worktree_agent"));
+  assert.ok(!prompt.toLowerCase().includes("worktree"));
+});
+
+test("the doctrine block is present, chained after the cwd line, when herdrAvailable is true", () => {
+  const prompt = buildAgentStartSystemPrompt(
+    "You are pi.\n\nCurrent working directory: /Users/me/x",
+    "/Users/me/x",
+    "/workspaces/x",
+    true,
+  );
+  assert.match(prompt, /devcontainer_herdr_start_worktree_agent/);
+  assert.match(prompt, /devcontainer-agent-fleet/);
+  // Chained onto the end, not replacing the cwd line.
+  assert.ok(
+    prompt.indexOf("Current working directory: /workspaces/x") <
+      prompt.indexOf("devcontainer_herdr_start_worktree_agent"),
+  );
+});
+
+test("the doctrine block is byte-identical across repeated calls with the same inputs", () => {
+  // A system prompt that changes per turn invalidates the provider's prefix cache.
+  const a = buildAgentStartSystemPrompt("base", "/h", "/w", true);
+  const b = buildAgentStartSystemPrompt("base", "/h", "/w", true);
+  assert.equal(a, b);
+});
+
+test("the doctrine block states a default, not a law", () => {
+  const prompt = buildAgentStartSystemPrompt("base", "/h", "/w", true);
+  assert.match(prompt, /default, not a law/);
 });

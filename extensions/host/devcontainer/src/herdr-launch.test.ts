@@ -8,7 +8,9 @@ import {
   commandForAgentKind,
   extractFirstPaneId,
   extractPaneId,
+  modelFlagForAgentKind,
   paneSplitArgs,
+  readyPatternForAgentKind,
   resolveDevcBin,
   shellQuote,
 } from "./herdr-launch.ts";
@@ -51,6 +53,29 @@ test("commandForAgentKind defaults to the kind itself", () => {
 test("commandForAgentKind applies the two known exceptions", () => {
   assert.equal(commandForAgentKind("qodercli"), "qoder");
   assert.equal(commandForAgentKind("agy"), "antigravity");
+});
+
+// ---- modelFlagForAgentKind ---------------------------------------------------
+
+test("modelFlagForAgentKind knows claude, copilot and pi — each measured against --help", () => {
+  assert.equal(modelFlagForAgentKind("claude"), "--model");
+  assert.equal(modelFlagForAgentKind("copilot"), "--model");
+  assert.equal(modelFlagForAgentKind("pi"), "--model");
+});
+
+test("modelFlagForAgentKind returns undefined for an unmeasured kind", () => {
+  assert.equal(modelFlagForAgentKind("codex"), undefined);
+  assert.equal(modelFlagForAgentKind("gemini"), undefined);
+});
+
+// ---- readyPatternForAgentKind -------------------------------------------------
+// Empty by design — see the table's own doc comment: Step 1.3 needs a live pane capture
+// this environment cannot provide, so no kind reports "ready" yet.
+
+test("readyPatternForAgentKind has no entries yet, for any kind", () => {
+  assert.equal(readyPatternForAgentKind("claude"), undefined);
+  assert.equal(readyPatternForAgentKind("copilot"), undefined);
+  assert.equal(readyPatternForAgentKind("pi"), undefined);
 });
 
 // ---- buildAgentCommandLine --------------------------------------------------
@@ -167,6 +192,34 @@ test("buildAgentCommandLine uses the container path, never a host one", () => {
   assert.ok(line.includes("-w '/workspaces/x'"));
 });
 
+// ---- model (both builders) ---------------------------------------------------
+
+test("buildAgentCommandLine appends the model flag for a covered kind", () => {
+  const line = buildAgentCommandLine({ ...base, agent: "claude", model: "opus" });
+  assert.ok(line.endsWith("exec '\\''claude'\\'' '\\''--model'\\'' '\\''opus'\\'''"), line);
+});
+
+test("buildAgentCommandLine appends the model flag after existing agentArgs", () => {
+  const line = buildAgentCommandLine({
+    ...base,
+    agent: "claude",
+    agentArgs: ["--permission-mode", "acceptEdits"],
+    model: "opus",
+  });
+  assert.ok(
+    line.endsWith(
+      "'\\''--permission-mode'\\'' '\\''acceptEdits'\\'' '\\''--model'\\'' '\\''opus'\\'''",
+    ),
+    line,
+  );
+});
+
+test("buildAgentCommandLine appends nothing for a kind with no known model flag", () => {
+  const withModel = buildAgentCommandLine({ ...base, agent: "codex", command: "codex", model: "big" });
+  const without = buildAgentCommandLine({ ...base, agent: "codex", command: "codex" });
+  assert.equal(withModel, without);
+});
+
 // ---- buildAgentCommandLineViaDevc -------------------------------------------
 
 test("buildAgentCommandLineViaDevc builds `devc <kind> --cwd <path>` for each covered kind", () => {
@@ -210,6 +263,28 @@ test("buildAgentCommandLineViaDevc appends and quotes agentArgs, no HERDR_AGENT,
   );
   assert.ok(!line!.includes("HERDR_AGENT"));
   assert.ok(!line!.includes("sh -lc"));
+});
+
+test("buildAgentCommandLineViaDevc appends the model flag for a covered kind", () => {
+  const line = buildAgentCommandLineViaDevc({ ...base, agent: "claude", model: "opus" });
+  assert.equal(
+    line,
+    "devc claude --cwd '/workspaces/tools/x.worktrees/feat' '--model' 'opus'",
+  );
+});
+
+test("buildAgentCommandLineViaDevc appends the model flag after existing agentArgs", () => {
+  const line = buildAgentCommandLineViaDevc({
+    ...base,
+    agent: "claude",
+    agentArgs: ["--permission-mode", "acceptEdits"],
+    model: "opus",
+  });
+  assert.equal(
+    line,
+    "devc claude --cwd '/workspaces/tools/x.worktrees/feat' " +
+      "'--permission-mode' 'acceptEdits' '--model' 'opus'",
+  );
 });
 
 test("buildAgentCommandLineViaDevc uses the container path, never a host one", () => {
