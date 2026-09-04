@@ -20,6 +20,9 @@
  * - `-w <containerPath>` — the container path, never the host one.
  */
 
+import { existsSync } from "node:fs";
+import { delimiter, join } from "node:path";
+
 /**
  * Single-quote `value` for a posix shell, escaping embedded single quotes the only way a
  * single-quoted string can: close, escaped quote, reopen.
@@ -86,6 +89,100 @@ export function buildAgentCommandLine(opts: AgentCommandLineOpts): string {
     "-lc",
     shellQuote(`exec ${inner}`),
   ].join(" ");
+}
+
+/**
+ * `devc`'s dedicated agent subcommands ("devc-tools"' `devc/help.ts`, the authoritative
+ * list) — keyed by the Herdr `--kind` value, valued by the `devc` subcommand name (currently
+ * identical, kept as two things because that is a coincidence, not a promise). Deliberately
+ * not the ~20-entry set `commandForAgentKind` covers: `devc attach` has no `EXTRA_ARGS` in
+ * its own `--help`, so it cannot stand in for an arbitrary kind the way these three do — see
+ * the plan's "Concept boundaries".
+ */
+const DEVC_SUBCOMMAND_FOR_KIND: Record<string, string> = {
+  claude: "claude",
+  copilot: "copilot",
+  pi: "pi",
+};
+
+/**
+ * `devc <kind> --cwd <containerPath> [<agentArgs…>]`, typed into the pane's own (host) shell
+ * — the same shell the `docker` form's `docker exec` would be typed into — or `null` when
+ * `kind` has no dedicated `devc` subcommand (only claude/copilot/pi do) or when `opts.env` is
+ * non-empty. `devc claude`/`copilot`/`pi --help` (0.2.0, "devc-tools"' `devc/help.ts`) carry
+ * no environment-variable flag, unlike the `docker` form's `-e K=V`, so there is no way to
+ * honor a requested `env` here — returning `null` lets the caller fall back to the `docker`
+ * builder instead of silently dropping it. Re-check `devc <kind> --help` before relaxing this
+ * if a future `devc` release adds one.
+ *
+ * No `HERDR_AGENT=` prefix, no `sh -lc 'exec …'` wrapping: `devc <kind>` is already the
+ * foreground command `devc`'s own watcher-plus-sidecar (`devc-tools`' `devc/herdr.ts`,
+ * shipped separately, not part of this builder) watches for once it sees `HERDR_ENV` in the
+ * pane — it asserts `HERDR_AGENT` on its own. `--cwd` takes `opts.containerPath` exactly as
+ * the `docker` form's `-w` does: a **container** path, never the host one (`devc`'s `--cwd`
+ * does accept a host path too and translates it, but this builder is never the place that
+ * ambiguity should be introduced — the caller already resolved the container path).
+ */
+export function buildAgentCommandLineViaDevc(
+  opts: AgentCommandLineOpts,
+): string | null {
+  const subcommand = DEVC_SUBCOMMAND_FOR_KIND[opts.agent];
+  if (!subcommand) return null;
+  if (opts.env && Object.keys(opts.env).length > 0) return null;
+
+  return [
+    "devc",
+    subcommand,
+    "--cwd",
+    shellQuote(opts.containerPath),
+    ...(opts.agentArgs ?? []).map(shellQuote),
+  ].join(" ");
+}
+
+/**
+ * Resolve a `devc` binary on `PATH` — the same synchronous `existsSync` walk
+ * `pi-extension-herdr-core`'s `resolveHerdrBin` does for `herdr`, minus the env-var override:
+ * `devc`'s presence only steers the *default* launcher choice (auto-detect), never a hard
+ * requirement the way `HERDR_BIN_PATH` is for `herdr`, so `PATH` is the only signal worth
+ * consulting. `env`/`exists` are injectable so this is testable with a fake `PATH` and no
+ * real `devc` binary. Returns the resolved path, or `undefined` when nothing matched.
+ */
+export function resolveDevcBin(
+  env: NodeJS.ProcessEnv = process.env,
+  exists: (path: string) => boolean = existsSync,
+): string | undefined {
+  const isWin = process.platform === "win32";
+  const exts = isWin ? (env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";") : [""];
+  const dirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
+  for (const dir of dirs) {
+    for (const ext of exts) {
+      const candidate = join(dir, ext ? `devc${ext}` : "devc");
+      try {
+        if (exists(candidate)) return candidate;
+      } catch {
+        // Unreadable directory on PATH — skip it.
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Auto-detect launcher strategy: the `devc` form when `devcBin` resolved *and* the kind is
+ * covered (and `env` is empty), otherwise the `docker` form. This is what `index.ts` wires
+ * into `HerdrToolDeps.buildCommandLine` for the auto-detect half of § Selection — the
+ * explicit `launcher` override in `herdr-tools.ts`'s `execute` bypasses this entirely rather
+ * than calling it, since an explicit request must error rather than silently substitute.
+ */
+export function buildAgentCommandLineAuto(
+  devcBin: string | undefined,
+  opts: AgentCommandLineOpts,
+): string {
+  if (devcBin !== undefined) {
+    const viaDevc = buildAgentCommandLineViaDevc(opts);
+    if (viaDevc !== null) return viaDevc;
+  }
+  return buildAgentCommandLine(opts);
 }
 
 export interface PaneSplitOpts {

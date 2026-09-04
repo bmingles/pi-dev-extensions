@@ -436,6 +436,74 @@ test("start_agent honours the launcher seam", async () => {
   );
 });
 
+// ---- devcontainer_herdr_start_agent — launcher override ---------------------
+// § Selection: an explicit `launcher` bypasses `deps.buildCommandLine` (auto-detect)
+// entirely, and "devc" must error rather than silently fall back to "docker" when devc
+// isn't usable for this call.
+
+test("launcher: 'docker' bypasses buildCommandLine even when devc auto-detect is wired", async () => {
+  const h = startHarness({
+    buildCommandLine: () => `devc-launcher-should-not-be-used`,
+    devcAvailable: true,
+  });
+  await run(h, "devcontainer_herdr_start_agent", { launcher: "docker" });
+  const line = h.calls.find((c) => c[1] === "run")![3];
+  assert.ok(line.startsWith("HERDR_AGENT='claude' docker exec"), line);
+});
+
+test("launcher: 'devc' builds the devc form for a covered kind, when devc is available", async () => {
+  const h = startHarness({ devcAvailable: true });
+  await run(h, "devcontainer_herdr_start_agent", { launcher: "devc", agent: "claude" });
+  const line = h.calls.find((c) => c[1] === "run")![3];
+  assert.equal(line, "devc claude --cwd '/workspaces/tools/repo'");
+});
+
+test("launcher: 'devc' errors clearly (not a silent docker fallback) when devc isn't available", async () => {
+  const h = startHarness({ devcAvailable: false });
+  const r = await run(h, "devcontainer_herdr_start_agent", { launcher: "devc" });
+  assert.equal(r.isError, true);
+  assert.equal(r.details.error.code, "DEVC_LAUNCHER_UNAVAILABLE");
+  assert.match(r.details.error.message, /no `devc` binary resolved/);
+  // Never reaches `pane run` — nothing was launched.
+  assert.ok(!h.calls.some((c) => c[1] === "run"));
+});
+
+test("launcher: 'devc' errors clearly for a kind devc has no subcommand for", async () => {
+  const h = startHarness({ devcAvailable: true });
+  const r = await run(h, "devcontainer_herdr_start_agent", {
+    launcher: "devc",
+    agent: "codex",
+  });
+  assert.equal(r.isError, true);
+  assert.equal(r.details.error.code, "DEVC_LAUNCHER_UNAVAILABLE");
+  assert.match(r.details.error.message, /codex/);
+  assert.ok(!h.calls.some((c) => c[1] === "run"));
+});
+
+test("launcher: 'devc' errors clearly rather than dropping requested env", async () => {
+  const h = startHarness({ devcAvailable: true });
+  const r = await run(h, "devcontainer_herdr_start_agent", {
+    launcher: "devc",
+    agent: "claude",
+    env: { FOO: "bar" },
+  });
+  assert.equal(r.isError, true);
+  assert.equal(r.details.error.code, "DEVC_LAUNCHER_UNAVAILABLE");
+  assert.ok(!h.calls.some((c) => c[1] === "run"));
+});
+
+test("with no launcher param, auto-detect (deps.buildCommandLine) still drives the pane", async () => {
+  const h = startHarness({
+    buildCommandLine: (opts) => `devc-launcher ${opts.containerPath}`,
+    devcAvailable: true,
+  });
+  await run(h, "devcontainer_herdr_start_agent", {});
+  assert.equal(
+    h.calls.find((c) => c[1] === "run")![3],
+    "devc-launcher /workspaces/tools/repo",
+  );
+});
+
 test("start_agent expands a ~ hostPath instead of refusing it", () => {
   // Without expansion this joins onto nothing sensible, misses every mount, and comes back
   // as NOT_MOUNTED_IN_CONTAINER — the same shape of failure a `~` repo produced on a real

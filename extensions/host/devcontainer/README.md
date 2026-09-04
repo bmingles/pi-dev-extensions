@@ -5,8 +5,11 @@ on the **host** and routes its built-in filesystem/shell tools into a
 **devcontainer**. The container's lifecycle is driven **in-process** through
 [`@devc-tools/core`](https://github.com/bmingles/devc-tools/tree/main/devc-core)
 — devc's own start/mounts logic as an npm library — and the routed commands run
-via `docker exec`. There is no `devc` binary to install (see Requirements
-below).
+via `docker exec`. There is no `devc` binary *required* (see Requirements
+below) — the seven routed built-ins never use one. The `devcontainer_herdr_*`
+tools below are the one exception: when a `devc` binary *is* resolvable on
+`PATH`, `devcontainer_herdr_start_agent` uses it automatically for a covered
+agent kind (see its own section).
 
 It is the same shape as pi's bundled
 [`gondolin`](https://github.com/earendil-works/gondolin) example (which routes
@@ -170,7 +173,7 @@ not confuse them in docs or a grep.
 | --- | --- |
 | `devcontainer_herdr_worktree_path` | Derives the host path for a branch under the `<repo>.worktrees/<slug>` sibling convention, and the container path for it. Creates nothing, never calls `herdr`. |
 | `devcontainer_herdr_worktree_create` | The same resolution, then `herdr worktree create`, then asserts the new checkout's `.git` link is relative. |
-| `devcontainer_herdr_start_agent` | Launches an agent inside the container. With `workspaceId` (from `worktree_create`'s `openWorkspaceId`), runs in the pane that workspace already has; without it, splits a new Herdr pane. Returns a `paneId`. |
+| `devcontainer_herdr_start_agent` | Launches an agent inside the container. With `workspaceId` (from `worktree_create`'s `openWorkspaceId`), runs in the pane that workspace already has; without it, splits a new Herdr pane. Returns a `paneId`. See "The pane launcher" below for how the pane's command line is built. |
 
 ### Two path vocabularies
 
@@ -215,6 +218,40 @@ there is one pane per worktree, and removing the worktree closes it along
 with the workspace. This is the first-class create-then-attach path; the
 split behavior remains for attaching to a worktree that already existed
 before this call.
+
+### The pane launcher: `docker exec` or `devc`
+
+`devcontainer_herdr_start_agent` builds the command line it types into the
+pane one of two ways:
+
+- The **`docker`** form — `HERDR_AGENT=<kind> docker exec -it -u <user> -w
+  <containerPath> … <id> sh -lc 'exec <command> …'` — always available, and
+  the only form that can carry `env` (as `-e K=V`) or launch any of the ~20
+  agent kinds `--kind` recognizes.
+- The **`devc`** form — `devc <kind> --cwd <containerPath> [agentArgs…]` —
+  only for the three kinds `devc` has a dedicated subcommand for
+  (`claude`/`copilot`/`pi`; `devc attach` has no `EXTRA_ARGS`, so it can't
+  stand in for the rest) and only when `env` is empty (`devc`'s launch
+  subcommands have no environment-variable flag as of this writing). It buys
+  `TERM`/`TERM_PROGRAM`/`TMUX` propagation the `docker` form drops, the
+  attach tint and title, and identity rotation if a human later takes the
+  pane over via `devc`'s own watcher-plus-sidecar (`devc-tools`'
+  `devc/herdr.ts`) — that sidecar is what actually asserts `HERDR_AGENT` for
+  this form, so the pane command line itself carries none.
+
+**Selection** is auto-detect by default: a `devc` binary resolved on `PATH`
+at extension load, and the requested kind covered, picks the `devc` form;
+otherwise the `docker` form, unchanged from before this existed. Pass
+`launcher: "docker"` or `launcher: "devc"` on `devcontainer_herdr_start_agent`
+to force one — an explicit `launcher: "devc"` **errors** (`DEVC_LAUNCHER_UNAVAILABLE`)
+rather than silently falling back to `docker` when `devc` isn't resolvable,
+the kind isn't one of the three, or `env` was passed; an explicit request
+deserves a clear answer, not a silent substitution.
+
+Note this is a different route from `agent start --kind` — Herdr's own
+agent-start command was tried and rejected for this launcher (see the
+`devc-launcher-variant` plan); it changes only the command line typed into
+the pane, nothing about how Herdr detects the agent once it's there.
 
 ### After the start
 
@@ -280,25 +317,35 @@ folders.
 ## Requirements
 
 - **Docker** — a running daemon and the `docker` CLI. That is the whole
-  runtime story: the container lifecycle comes from the `@devc-tools/core` npm
-  dependency (which carries the devcontainer CLI as a dependency of its own and
-  runs it with this same Node), and the routed commands are `docker exec`. No
-  `devc` binary on `PATH`, and no environment-variable override pointing at
-  one — both are gone. The
+  runtime story for the seven routed built-ins: the container lifecycle comes
+  from the `@devc-tools/core` npm dependency (which carries the devcontainer
+  CLI as a dependency of its own and runs it with this same Node), and the
+  routed commands are `docker exec`. No `devc` binary on `PATH` is required
+  for any of that, and no environment-variable override pointing at one
+  exists. The
   [`devc`](https://github.com/bmingles/devc-tools/tree/main/devc) CLI is
   still useful alongside this extension (`devc stop`, `devc down`,
-  `devc config`), but it is complementary, not required.
+  `devc config`), but it is complementary, not required — everything still
+  works with only Docker and Node.
 - **Node.js ≥ 22.19.0** — native `.ts` type-stripping (no build step) needs
   Node's default-on stripping support (22.18.0+); this package's source uses
   no non-erasable TS syntax, so the extra `--experimental-transform-types`
   flag some code needs is never required. (The repo-root `.nvmrc` pins a
   newer version for local dev — that's not a floor.)
 
-**The Herdr orchestration tools below add nothing to this list.** They shell
-out to a `herdr` binary if one is present and build their own `docker exec`
-argv; they need no `devc` on `PATH`, and without Herdr they simply do not
-register. That promise is deliberate — a reader who assumes otherwise will add
-a dependency that is not needed.
+**The Herdr orchestration tools below add nothing to this list — with one
+precise nuance.** They shell out to a `herdr` binary if one is present and
+are registered only when it resolves; without Herdr they simply do not
+register, no `devc` needed either way. Once registered, though,
+`devcontainer_herdr_start_agent` *does* look for `devc` on `PATH`: when one
+resolves and the requested agent kind is one `devc` has a dedicated
+subcommand for (`claude`/`copilot`/`pi`), it routes the pane's command line
+through `devc <kind> --cwd <containerPath>` instead of a raw `docker exec`,
+automatically, for the benefits under "The pane launcher" below. Absent or
+uncovered, the `docker exec` form is used exactly as before — nothing about
+this extension's own requirements changes, and a reader who assumes
+otherwise will add a dependency that is not actually needed for anything
+this extension itself does.
 
 ## Development
 

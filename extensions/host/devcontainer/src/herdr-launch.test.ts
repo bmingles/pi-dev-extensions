@@ -3,10 +3,13 @@ import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import {
   buildAgentCommandLine,
+  buildAgentCommandLineAuto,
+  buildAgentCommandLineViaDevc,
   commandForAgentKind,
   extractFirstPaneId,
   extractPaneId,
   paneSplitArgs,
+  resolveDevcBin,
   shellQuote,
 } from "./herdr-launch.ts";
 
@@ -162,6 +165,143 @@ test("hostile values stay single words and start no new command", () => {
 test("buildAgentCommandLine uses the container path, never a host one", () => {
   const line = buildAgentCommandLine({ ...base, containerPath: "/workspaces/x" });
   assert.ok(line.includes("-w '/workspaces/x'"));
+});
+
+// ---- buildAgentCommandLineViaDevc -------------------------------------------
+
+test("buildAgentCommandLineViaDevc builds `devc <kind> --cwd <path>` for each covered kind", () => {
+  for (const [agent, subcommand] of [["claude", "claude"], ["copilot", "copilot"], ["pi", "pi"]] as const) {
+    assert.equal(
+      buildAgentCommandLineViaDevc({ ...base, agent, command: agent }),
+      `devc ${subcommand} --cwd '/workspaces/tools/x.worktrees/feat'`,
+    );
+  }
+});
+
+test("buildAgentCommandLineViaDevc returns null for a kind devc has no subcommand for", () => {
+  assert.equal(buildAgentCommandLineViaDevc({ ...base, agent: "codex" }), null);
+  assert.equal(buildAgentCommandLineViaDevc({ ...base, agent: "qodercli" }), null);
+});
+
+test("buildAgentCommandLineViaDevc returns null when env is set, rather than dropping it", () => {
+  assert.equal(
+    buildAgentCommandLineViaDevc({ ...base, agent: "claude", env: { FOO: "bar" } }),
+    null,
+  );
+});
+
+test("buildAgentCommandLineViaDevc tolerates an empty env object", () => {
+  assert.notEqual(
+    buildAgentCommandLineViaDevc({ ...base, agent: "claude", env: {} }),
+    null,
+  );
+});
+
+test("buildAgentCommandLineViaDevc appends and quotes agentArgs, no HERDR_AGENT, no sh -lc", () => {
+  const line = buildAgentCommandLineViaDevc({
+    ...base,
+    agent: "claude",
+    agentArgs: ["--permission-mode", "acceptEdits"],
+  });
+  assert.equal(
+    line,
+    "devc claude --cwd '/workspaces/tools/x.worktrees/feat' " +
+      "'--permission-mode' 'acceptEdits'",
+  );
+  assert.ok(!line!.includes("HERDR_AGENT"));
+  assert.ok(!line!.includes("sh -lc"));
+});
+
+test("buildAgentCommandLineViaDevc uses the container path, never a host one", () => {
+  const line = buildAgentCommandLineViaDevc({
+    ...base,
+    agent: "claude",
+    containerPath: "/workspaces/x",
+  });
+  assert.ok(line!.includes("--cwd '/workspaces/x'"));
+});
+
+test("a real shell splits a devc command line into exactly the intended argv", () => {
+  const line = buildAgentCommandLineViaDevc({
+    ...base,
+    agent: "claude",
+    containerPath: "/w/it's a dir",
+    agentArgs: ["a b"],
+  })!;
+  assert.deepEqual(shellWords(line), [
+    "devc",
+    "claude",
+    "--cwd",
+    "/w/it's a dir",
+    "a b",
+  ]);
+});
+
+// ---- resolveDevcBin -----------------------------------------------------------
+
+test("resolveDevcBin finds devc on a fake PATH via injected existsSync", () => {
+  const bin = resolveDevcBin(
+    { PATH: "/usr/bin:/opt/devc/bin" },
+    (p) => p === "/opt/devc/bin/devc",
+  );
+  assert.equal(bin, "/opt/devc/bin/devc");
+});
+
+test("resolveDevcBin returns undefined when nothing on PATH matches", () => {
+  const bin = resolveDevcBin({ PATH: "/usr/bin:/opt/devc/bin" }, () => false);
+  assert.equal(bin, undefined);
+});
+
+test("resolveDevcBin walks PATH in order and stops at the first match", () => {
+  const seen: string[] = [];
+  const bin = resolveDevcBin(
+    { PATH: "/a:/b:/c" },
+    (p) => {
+      seen.push(p);
+      return p === "/b/devc";
+    },
+  );
+  assert.equal(bin, "/b/devc");
+  assert.deepEqual(seen, ["/a/devc", "/b/devc"]);
+});
+
+test("resolveDevcBin tolerates an unreadable directory on PATH", () => {
+  const bin = resolveDevcBin(
+    { PATH: "/bad:/good" },
+    (p) => {
+      if (p.startsWith("/bad")) throw new Error("EACCES");
+      return p === "/good/devc";
+    },
+  );
+  assert.equal(bin, "/good/devc");
+});
+
+// ---- buildAgentCommandLineAuto ------------------------------------------------
+
+test("buildAgentCommandLineAuto uses devc when resolved and the kind is covered", () => {
+  const line = buildAgentCommandLineAuto("/usr/local/bin/devc", { ...base, agent: "claude" });
+  assert.ok(line.startsWith("devc claude"), line);
+});
+
+test("buildAgentCommandLineAuto falls back to docker when devc is not resolved", () => {
+  const line = buildAgentCommandLineAuto(undefined, { ...base, agent: "claude" });
+  assert.ok(line.startsWith("HERDR_AGENT="), line);
+  assert.ok(line.includes("docker exec"), line);
+});
+
+test("buildAgentCommandLineAuto falls back to docker when devc is resolved but the kind isn't covered", () => {
+  const line = buildAgentCommandLineAuto("/usr/local/bin/devc", { ...base, agent: "codex" });
+  assert.ok(line.includes("docker exec"), line);
+});
+
+test("buildAgentCommandLineAuto falls back to docker when devc is resolved but env is set", () => {
+  const line = buildAgentCommandLineAuto("/usr/local/bin/devc", {
+    ...base,
+    agent: "claude",
+    env: { FOO: "bar" },
+  });
+  assert.ok(line.includes("docker exec"), line);
+  assert.ok(line.includes("-e 'FOO=bar'"), line);
 });
 
 // ---- paneSplitArgs ----------------------------------------------------------

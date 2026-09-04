@@ -37,6 +37,7 @@ import type { ContainerInfo } from "./container.ts";
 import {
   type AgentCommandLineOpts,
   buildAgentCommandLine,
+  buildAgentCommandLineViaDevc,
   commandForAgentKind,
   extractFirstPaneId,
   extractPaneId,
@@ -58,7 +59,8 @@ export type HerdrToolErrorCode =
   | "HERDR_FAILED"
   | "ABSOLUTE_GITDIR"
   | "PANE_GONE"
-  | "AGENT_NOT_DETECTED";
+  | "AGENT_NOT_DETECTED"
+  | "DEVC_LAUNCHER_UNAVAILABLE";
 
 type ErrorDetails = {
   error: { code: HerdrToolErrorCode; message: string };
@@ -74,15 +76,16 @@ function fail<T extends ErrorDetails>(
 }
 
 /**
- * The `pane run` command line builder, as a seam. Only the `docker` form is implemented
- * here, and it is the one the extension's stated requirements allow: Docker and Node, no
- * `devc` on PATH.
+ * The `pane run` command line builder, as a seam. `index.ts` wires this to
+ * `buildAgentCommandLineAuto` (auto-detect between the `docker` and `devc` forms) for the
+ * real extension; defaults to the `docker` form here when unset, which is what every test
+ * harness that doesn't care about the launcher gets for free.
  *
- * The `devc` variant — `devc attach --cwd <containerPath>` behind the same `HERDR_AGENT`
- * prefix — buys `TERM`/`TERM_PROGRAM`/`TMUX` propagation, the attach tint, and identity
- * rotation if a human takes the pane over. It needs `devc` on PATH (a requirement this
- * extension deliberately does not have) plus `devc`'s `--cwd` flag, so it is left as a
- * substitution rather than stubbed as a parameter with one legal value.
+ * The `devc` variant (`buildAgentCommandLineViaDevc` in `herdr-launch.ts`) buys
+ * `TERM`/`TERM_PROGRAM`/`TMUX` propagation, the attach tint, and identity rotation if a human
+ * takes the pane over, for the three kinds `devc` has a dedicated subcommand for
+ * (claude/copilot/pi) — it needs `devc` on PATH, which this extension's stated requirements
+ * still do not (it stays optional; see the README's Requirements section).
  */
 export type LaunchCommandBuilder = (opts: AgentCommandLineOpts) => string;
 
@@ -113,6 +116,15 @@ export interface HerdrToolDeps extends HerdrPathDeps {
   now(): number;
   /** Defaults to the `docker exec` form. See {@link LaunchCommandBuilder}. */
   buildCommandLine?: LaunchCommandBuilder;
+  /**
+   * Whether a `devc` binary resolved on `PATH` at extension load. Used only to give the
+   * explicit `launcher: "devc"` override (`startParams`) a precise error when `devc` isn't
+   * installed — `buildAgentCommandLineViaDevc` alone can't distinguish "no devc on PATH"
+   * from "kind not covered by devc", and an explicit request deserves the right answer.
+   * Auto-detect doesn't consult this: PATH resolution is already baked into `buildCommandLine`
+   * at the `index.ts` construction site. Defaults to `false`.
+   */
+  devcAvailable?: boolean;
 }
 
 /** Resolve the container and its mount table in one step, or the error that stopped us. */
@@ -446,6 +458,17 @@ const startParams = Type.Object({
       description: "Extra environment variables, passed as `-e K=V` on the docker exec.",
     }),
   ),
+  launcher: Type.Optional(
+    Type.Union([Type.Literal("docker"), Type.Literal("devc")], {
+      description:
+        "Force a specific pane command line instead of auto-detecting (default). 'docker' " +
+        "is the raw `docker exec` form (always available). 'devc' routes through " +
+        "`devc <kind> --cwd <containerPath>` instead, which only `claude`/`copilot`/`pi` " +
+        "have a dedicated subcommand for and which has no way to pass `env` — an explicit " +
+        "'devc' errors (rather than silently falling back to 'docker') if `devc` isn't on " +
+        "PATH, `agent` isn't one of those three, or `env` is set.",
+    }),
+  ),
 });
 
 type StartOkDetails = {
@@ -563,7 +586,7 @@ export function registerStartAgentTool(
           }
         }
 
-        const commandLine = buildCommandLine({
+        const cmdOpts: AgentCommandLineOpts = {
           agent,
           containerId: a.info.containerId,
           remoteUser: a.info.remoteUser,
@@ -571,7 +594,34 @@ export function registerStartAgentTool(
           command: params.command ?? commandForAgentKind(agent),
           agentArgs: params.agentArgs,
           env: params.env,
-        });
+        };
+
+        let commandLine: string;
+        if (params.launcher === "docker") {
+          commandLine = buildAgentCommandLine(cmdOpts);
+        } else if (params.launcher === "devc") {
+          if (!deps.devcAvailable) {
+            return fail<StartDetails & ErrorDetails>(
+              "DEVC_LAUNCHER_UNAVAILABLE",
+              "launcher: 'devc' was requested, but no `devc` binary resolved on PATH at " +
+                "extension load. Omit `launcher` for auto-detect (falls back to `docker` " +
+                "automatically), or pass launcher: 'docker' explicitly.",
+            );
+          }
+          const viaDevc = buildAgentCommandLineViaDevc(cmdOpts);
+          if (viaDevc === null) {
+            return fail<StartDetails & ErrorDetails>(
+              "DEVC_LAUNCHER_UNAVAILABLE",
+              `launcher: 'devc' was requested, but devc has no dedicated subcommand for ` +
+                `agent kind '${agent}' (only claude/copilot/pi do), or 'env' was passed, ` +
+                "which devc's launcher has no flag for. Pass launcher: 'docker' instead, " +
+                "or drop env.",
+            );
+          }
+          commandLine = viaDevc;
+        } else {
+          commandLine = buildCommandLine(cmdOpts);
+        }
         // No `--json` (see the comment on `paneSplitArgs`), and `tolerateEmptySuccess`:
         // live-tested against a real host and found `pane run` exits 0 with *empty* stdout
         // on at least one Herdr build — no JSON envelope even without `--json` fighting it —

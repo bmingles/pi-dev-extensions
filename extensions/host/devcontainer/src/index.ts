@@ -17,9 +17,13 @@
  *   cd /path/to/project
  *   pi -e /path/to/pi-dev-extensions/extensions/host/devcontainer
  *
- * Requires Docker and Node — no `devc` binary on PATH. That stays true with the Herdr
- * orchestration tools below: they shell out to `herdr` and build their own `docker exec`
- * argv, and are registered only when a `herdr` binary resolves.
+ * Requires only Docker and Node — `devc` on PATH is never required. That stays true with
+ * the Herdr orchestration tools below: they shell out to `herdr` and are registered only
+ * when a `herdr` binary resolves, and by default they build a raw `docker exec` for the pane
+ * they launch an agent in. When a `devc` binary *is* resolvable (optional) and the launched
+ * kind has a dedicated `devc` subcommand, `devcontainer_herdr_start_agent` routes through it
+ * instead — see `herdr-launch.ts`'s `buildAgentCommandLineAuto` — for the `TERM`/tint/rotation
+ * benefits `devc attach` carries; absent or uncovered, the `docker` form is unchanged.
  *
  * Host-only: `requireSide` refuses to load this on a container side.
  */
@@ -50,6 +54,7 @@ import { resolveHerdrBin, runHerdr } from "pi-extension-herdr-core";
 import { requireSide, type SideProbe } from "pi-extension-core";
 import { realFsProbe, resolveWorktree } from "@devc-tools/core";
 import { registerDevcontainerHerdrTools } from "./herdr-tools.ts";
+import { buildAgentCommandLineAuto, resolveDevcBin } from "./herdr-launch.ts";
 import {
   type ContainerInfo,
   ensureContainer as containerUp,
@@ -109,6 +114,14 @@ export default function (pi: ExtensionAPI, probe?: SideProbe) {
   // rather than per call.
   const herdrBin = resolveHerdrBin();
   const herdrAvailable = herdrBin !== "herdr";
+
+  // The launcher auto-detect half of the devc-launcher-variant plan's § Selection: resolved
+  // once, synchronously, same posture as herdrBin above. `devc`'s presence steers only which
+  // pane command line devcontainer_herdr_start_agent builds by default (`buildCommandLine`
+  // below) — whether the Herdr tools themselves register at all stays keyed on
+  // herdrAvailable, unchanged by this.
+  const devcBin = resolveDevcBin();
+  const devcAvailable = devcBin !== undefined;
 
   // Built-in tools instantiated against the host cwd, used only for their name +
   // schema when spreading into the overrides below.
@@ -437,6 +450,8 @@ export default function (pi: ExtensionAPI, probe?: SideProbe) {
       resolveWorktree: (hostPath) => resolveWorktree(hostPath, null, realFsProbe),
       sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
       now: () => Date.now(),
+      buildCommandLine: (opts) => buildAgentCommandLineAuto(devcBin, opts),
+      devcAvailable,
     });
   }
 
