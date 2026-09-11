@@ -15,7 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@devc-tools/core": "^0.1.4",
+    "@devc-tools/core": "^0.2.0",
     "pi-extension-core": "file:../../shared/extension-core",
     "pi-extension-herdr-core": "file:../../shared/herdr-core",
     "pi-extension-host-read-core": "file:../../shared/host-read-core"
